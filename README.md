@@ -9,7 +9,7 @@ A Python library for regularizing building footprints in geospatial data. This l
 
 Before and after regularization:
 
-![Before and After Regularization](https://raw.githubusercontent.com/DPIRD-DMA/Building-Regulariser/main/examples/1.png)
+![Before and After Regularization](/examples/1.png?raw=true "Before and After Regularization")
 
 
 ## Overview
