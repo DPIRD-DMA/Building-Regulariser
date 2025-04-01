@@ -5,6 +5,8 @@ Functions for applying regularization to GeoDataFrame objects with polygon geome
 """
 
 import warnings
+from functools import partial  # Helpful for passing fixed arguments
+from multiprocessing import Pool
 from typing import Optional, Union
 
 import geopandas as gpd
@@ -14,14 +16,30 @@ from pyproj import CRS
 from .regularization import process_geometry
 
 
+def cleanup_geometry(result_geodataframe: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
+
+    result_geodataframe["geometry"] = result_geodataframe.geometry.buffer(
+        0.001, cap_style="square", join_style="mitre"
+    )
+    result_geodataframe["geometry"] = result_geodataframe.geometry.buffer(
+        -0.002, cap_style="square", join_style="mitre"
+    )
+    result_geodataframe["geometry"] = result_geodataframe.geometry.buffer(
+        0.001, cap_style="square", join_style="mitre"
+    )
+    result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
+    return result_geodataframe
+
+
 def regularize_geodataframe(
     geodataframe: gpd.GeoDataFrame,
-    epsilon: float = 6,
     parallel_threshold: float = 3,
     target_crs: Optional[Union[str, pyproj.CRS]] = None,
     check_projection: bool = True,
     simplify: bool = True,
     simplify_tolerance: float = 0.5,
+    processes: int = 1,
 ) -> gpd.GeoDataFrame:
     """
     Regularize polygons in a GeoDataFrame by aligning edges to principal directions
@@ -68,27 +86,27 @@ def regularize_geodataframe(
                 "Input GeoDataFrame is in a geographic CRS (not projected). "
                 "This may affect angle calculations. Consider setting target_crs."
             )
-    result_geodataframe.geometry = result_geodataframe.simplify(
-        tolerance=simplify_tolerance, preserve_topology=True
-    )
-
-    # Single process implementation
-    result_geodataframe["geometry"] = result_geodataframe.geometry.apply(
-        lambda geom: process_geometry(geom, epsilon, parallel_threshold)  # type: ignore
-    )  # type: ignore
-
-    result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
-
-    result_geodataframe["geometry"] = result_geodataframe.geometry.buffer(
-        0.001, cap_style="square", join_style="mitre"
-    )
-    result_geodataframe["geometry"] = result_geodataframe.geometry.buffer(
-        -0.002, cap_style="square", join_style="mitre"
-    )
-    result_geodataframe["geometry"] = result_geodataframe.geometry.buffer(
-        0.001, cap_style="square", join_style="mitre"
-    )
-    result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
+    if simplify:
+        result_geodataframe.geometry = result_geodataframe.simplify(
+            tolerance=simplify_tolerance, preserve_topology=True
+        )
+    if processes > 1:
+        # Parallel processing
+        with Pool(processes) as pool:
+            # Use partial to fix the arguments for the process_geometry function
+            process_func = partial(
+                process_geometry, parallel_threshold=parallel_threshold
+            )
+            result_geodataframe["geometry"] = pool.map(
+                process_func, result_geodataframe.geometry.tolist()
+            )
+    else:
+        # Single process implementation
+        result_geodataframe["geometry"] = result_geodataframe.geometry.apply(
+            lambda geom: process_geometry(geom, parallel_threshold)  # type: ignore
+        )  # type: ignore
+    # Cleanup geometry
+    result_geodataframe = cleanup_geometry(result_geodataframe)
 
     # Reproject back to original CRS if necessary
     if target_crs is not None and original_crs is not None:

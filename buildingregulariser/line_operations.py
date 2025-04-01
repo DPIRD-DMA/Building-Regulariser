@@ -78,15 +78,14 @@ def calculate_parallel_line_distance(
     """
     A1, B1, C1 = line1
     A2, B2, C2 = line2
+    eps = 1e-10
 
     # Normalize equations to the form: x + (B/A)y + (C/A) = 0
-    new_A1 = 1
-    new_B1 = B1 / A1
-    new_C1 = C1 / A1
+    new_C1 = C1 / (A1 + eps)
 
     new_A2 = 1
-    new_B2 = B2 / A2
-    new_C2 = C2 / A2
+    new_B2 = B2 / (A2 + eps)
+    new_C2 = C2 / (A2 + eps)
 
     # Calculate distance using the formula for parallel lines
     distance = (np.abs(new_C1 - new_C2)) / (np.sqrt(new_A2 * new_A2 + new_B2 * new_B2))

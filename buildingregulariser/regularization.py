@@ -20,11 +20,12 @@ from .line_operations import (
     project_point_to_line,
 )
 from .rotation import rotate_point_clockwise, rotate_point_counterclockwise
-from .simplification import simplify_with_rdp
+
+# from .simplification import simplify_with_rdp
 
 
 def regularize_coordinate_array(
-    coordinates: np.ndarray, epsilon: float = 6, parallel_threshold: float = 3
+    coordinates: np.ndarray, parallel_threshold: float = 3
 ) -> np.ndarray:
     """
     Regularize polygon coordinates by aligning edges to be either parallel
@@ -44,23 +45,11 @@ def regularize_coordinate_array(
     numpy.ndarray
         Regularized coordinates array
     """
-    # Ensure coordinates are closed
-    if not np.array_equal(coordinates[0], coordinates[-1]):
-        coordinates = np.vstack([coordinates, coordinates[0]])
-
-    # Simplify using RDP algorithm
-    simplified_coordinates = simplify_with_rdp(coordinates, epsilon=epsilon)
-
-    # Ensure simplified_coordinates is a numpy array
-    if not isinstance(simplified_coordinates, np.ndarray):
-        simplified_coordinates = np.array(simplified_coordinates)
-
     # Analyze edges to find properties and main direction
-    edge_data = analyze_edges(simplified_coordinates)
-
+    edge_data = analyze_edges(coordinates)
+    # print(edge_data)
     # Orient edges based on longest edge direction
-    oriented_edges, edge_orientations = orient_edges(simplified_coordinates, edge_data)
-
+    oriented_edges, edge_orientations = orient_edges(coordinates, edge_data)
     # Connect and regularize edges
     regularized_points = connect_regularized_edges(
         oriented_edges, edge_orientations, parallel_threshold
@@ -111,29 +100,45 @@ def analyze_edges(simplified_coordinates: np.ndarray):
     }
 
 
-def orient_edges(simplified_coordinates: np.ndarray, edge_data: dict):
+def orient_edges(
+    simplified_coordinates: np.ndarray, edge_data: dict, allow_45: bool = True
+):
     """
-    Orient edges to be parallel or perpendicular to the main direction
+    Orient edges to be parallel or perpendicular (or optionally 45 degrees)
+    to the main direction.
 
     Parameters:
     -----------
     simplified_coordinates : numpy.ndarray
-        Simplified polygon coordinates
+        Simplified polygon coordinates (shape: n x 2, assumed closed).
     edge_data : dict
-        Dictionary containing edge analysis data
+        Dictionary containing edge analysis data ('azimuth_angles', 'edge_indices',
+        'longest_edge_index', 'main_direction').
+    allow_45 : bool, optional
+        If True, allows edges to be oriented at 45-degree angles relative
+        to the main direction. Defaults to False (only parallel/perpendicular).
 
     Returns:
     --------
     tuple
-        Tuple containing oriented edges array and edge orientations list
+        Tuple containing:
+        - oriented_edges (numpy.ndarray): Array of [start, end] points for each oriented edge.
+        - edge_orientations (list): List of orientation codes for each edge.
+          - 0: Parallel or anti-parallel (0, 180 deg relative to main_direction)
+          - 1: Perpendicular (90, 270 deg relative to main_direction)
+          - 2: Diagonal (45, 135, 225, 315 deg relative to main_direction) - only if allow_45=True.
     """
     oriented_edges = []
-    edge_orientations = []  # 0=parallel, 1=perpendicular
+    # Orientation codes: 0=Parallel/AntiParallel, 1=Perpendicular, 2=Diagonal(45deg)
+    edge_orientations = []
 
     azimuth_angles = edge_data["azimuth_angles"]
     edge_indices = edge_data["edge_indices"]
     longest_edge_index = edge_data["longest_edge_index"]
     main_direction = edge_data["main_direction"]
+
+    # Small tolerance for floating point comparisons
+    tolerance = 1e-9
 
     for i, (azimuth, (start_idx, end_idx)) in enumerate(
         zip(azimuth_angles, edge_indices)
@@ -147,24 +152,61 @@ def orient_edges(simplified_coordinates: np.ndarray, edge_data: dict):
                 ]
             )
             edge_orientations.append(0)  # Parallel to main direction
-        else:
-            # Determine rotation angle to align with main direction
-            rotation_angle = main_direction - azimuth
+            continue  # Skip to next edge
 
-            if np.abs(rotation_angle) < 45:  # 180/4 = 45
-                # Make parallel to main direction
-                edge_orientations.append(0)
-            elif np.abs(rotation_angle) >= 45:
-                # Make perpendicular to main direction
-                rotation_angle = rotation_angle + 90
-                edge_orientations.append(1)
+        # --- Handle non-longest edges ---
 
-            # Perform rotation
-            start_point = np.array(simplified_coordinates[start_idx], dtype=float)
-            end_point = np.array(simplified_coordinates[end_idx], dtype=float)
-            rotated_edge = rotate_edge(start_point, end_point, rotation_angle)
+        # Calculate the shortest angle difference from edge azimuth to main_direction
+        # Result is in the range [-180, 180]
+        diff_angle = (azimuth - main_direction + 180) % 360 - 180
 
-            oriented_edges.append(rotated_edge)
+        target_offset = (
+            0.0  # The desired angle relative to main_direction (0, 45, 90 etc.)
+        )
+        orientation_code = 0
+
+        if allow_45:
+            # Snap to the nearest multiple of 45 degrees
+            target_offset = round(diff_angle / 45.0) * 45.0
+
+            # Determine orientation code based on the target offset
+            norm_target_offset = (
+                target_offset % 360
+            )  # Normalize to 0-360 range for checks
+            if abs(norm_target_offset % 90) < tolerance:  # Is it a multiple of 90?
+                orientation_code = 0 if abs(norm_target_offset % 180) < tolerance else 1
+            else:  # Must be a 45-degree diagonal
+                orientation_code = 2
+
+        else:  # Original logic (refined): Snap only to nearest 90 degrees
+            if abs(diff_angle) < 45.0:  # Closer to parallel/anti-parallel (0 or 180)
+                # Snap to 0 or 180, whichever is closer
+                target_offset = round(diff_angle / 180.0) * 180.0
+                orientation_code = 0
+            else:  # Closer to perpendicular (+90 or -90/270)
+                # Snap to +90 or -90, whichever is closer
+                target_offset = round(diff_angle / 90.0) * 90.0
+                # Ensure it's not actually 0 or 180 (should be handled above, but safety check)
+                if abs(target_offset % 180) < tolerance:
+                    # If rounding diff_angle/90 gave 0 or 180, force to 90 or -90
+                    target_offset = 90.0 if diff_angle > 0 else -90.0
+                orientation_code = 1
+
+        # Calculate the rotation angle needed to achieve the target orientation
+        # target_angle = main_direction + target_offset
+        # rotation = target_angle - azimuth
+        # Calculate shortest rotation angle
+        rotation_angle = (main_direction + target_offset - azimuth + 180) % 360 - 180
+
+        # Perform rotation
+        start_point = np.array(simplified_coordinates[start_idx], dtype=float)
+        end_point = np.array(simplified_coordinates[end_idx], dtype=float)
+
+        # Ensure rotate_edge function is available and imported
+        rotated_edge = rotate_edge(start_point, end_point, rotation_angle)
+
+        oriented_edges.append(rotated_edge)
+        edge_orientations.append(orientation_code)
 
     return np.array(oriented_edges, dtype=object), edge_orientations
 
@@ -439,7 +481,6 @@ def hausdorff_ratio(poly1, poly2):
 
 def regularize_single_polygon(
     polygon: Polygon,
-    epsilon: float = 6,
     parallel_threshold: float = 3,
 ) -> Polygon:
     """
@@ -463,8 +504,11 @@ def regularize_single_polygon(
     # Handle exterior ring
 
     exterior_coordinates = np.array(polygon.exterior.coords)
+    # append the first point to the end to close the polygon
+
+    # print(exterior_coordinates)
     regularized_exterior = regularize_coordinate_array(
-        exterior_coordinates, epsilon=epsilon, parallel_threshold=parallel_threshold
+        exterior_coordinates, parallel_threshold=parallel_threshold
     )
 
     # Handle interior rings (holes)
@@ -472,7 +516,7 @@ def regularize_single_polygon(
     for interior in polygon.interiors:
         interior_coordinates = np.array(interior.coords)
         regularized_interior = regularize_coordinate_array(
-            interior_coordinates, epsilon=epsilon, parallel_threshold=parallel_threshold
+            interior_coordinates, parallel_threshold=parallel_threshold
         )
         regularized_interiors.append(regularized_interior)
 
@@ -491,9 +535,7 @@ def regularize_single_polygon(
         return polygon
 
 
-def process_geometry(
-    geometry: BaseGeometry, epsilon: float, parallel_threshold: float
-) -> BaseGeometry:
+def process_geometry(geometry: BaseGeometry, parallel_threshold: float) -> BaseGeometry:
     """
     Process a single geometry, handling different geometry types
 
@@ -512,10 +554,10 @@ def process_geometry(
         Regularized geometry
     """
     if isinstance(geometry, Polygon):
-        return regularize_single_polygon(geometry, epsilon, parallel_threshold)
+        return regularize_single_polygon(geometry, parallel_threshold)
     elif isinstance(geometry, MultiPolygon):
         regularized_parts = [
-            regularize_single_polygon(part, epsilon, parallel_threshold)
+            regularize_single_polygon(part, parallel_threshold)
             for part in geometry.geoms
         ]
         return MultiPolygon(regularized_parts)

@@ -19,11 +19,12 @@ from .regularization import (
     regularize_single_polygon,
 )
 from .rotation import rotate_point_clockwise, rotate_point_counterclockwise
-from .simplification import simplify_with_rdp
+
+# from .simplification import simplify_with_rdp
 
 # Package-wide exports
 __all__ = [
-    "simplify_with_rdp",
+    # "simplify_with_rdp",
     "calculate_distance",
     "calculate_azimuth_angle",
     "create_line_equation",
