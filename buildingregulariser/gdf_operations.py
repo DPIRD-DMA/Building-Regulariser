@@ -14,17 +14,21 @@ from pyproj import CRS
 from .regularization import process_geometry
 
 
-def cleanup_geometry(result_geodataframe: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+def cleanup_geometry(
+    result_geodataframe: gpd.GeoDataFrame, simplify_tolerance: float
+) -> gpd.GeoDataFrame:
     result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
 
+    buffer_size = simplify_tolerance / 50
+
     result_geodataframe["geometry"] = result_geodataframe.geometry.buffer(
-        0.001, cap_style="square", join_style="mitre"
+        buffer_size, cap_style="square", join_style="mitre"
     )
     result_geodataframe["geometry"] = result_geodataframe.geometry.buffer(
-        -0.002, cap_style="square", join_style="mitre"
+        buffer_size * -2, cap_style="square", join_style="mitre"
     )
     result_geodataframe["geometry"] = result_geodataframe.geometry.buffer(
-        0.001, cap_style="square", join_style="mitre"
+        buffer_size, cap_style="square", join_style="mitre"
     )
     result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
     return result_geodataframe
@@ -89,7 +93,7 @@ def regularize_geodataframe(
         lambda geom: process_geometry(geom, parallel_threshold)  # type: ignore
     )  # type: ignore
 
-    result_geodataframe = cleanup_geometry(result_geodataframe)
+    result_geodataframe = cleanup_geometry(result_geodataframe, simplify_tolerance)
 
     # Reproject back to original CRS if necessary
     if target_crs is not None and original_crs is not None:

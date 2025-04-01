@@ -1,5 +1,4 @@
 *.gpkg*
 *__pycache__*
-*.ipynb
-test.ipynb
+**.ipynb*
 buildingregulariser.egg-info/*
