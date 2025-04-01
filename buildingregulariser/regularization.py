@@ -20,8 +20,6 @@ from .line_operations import (
 )
 from .rotation import rotate_point_clockwise, rotate_point_counterclockwise
 
-# from .simplification import simplify_with_rdp
-
 
 def regularize_coordinate_array(
     coordinates: np.ndarray, parallel_threshold: float = 3
@@ -226,16 +224,13 @@ def orient_edges(
         # Perform rotation
         start_point = np.array(simplified_coordinates[start_idx], dtype=float)
         end_point = np.array(simplified_coordinates[end_idx], dtype=float)
-        # print(start_idx, end_idx)
 
         # Ensure rotate_edge function is available and imported
         rotated_edge = rotate_edge(start_point, end_point, rotation_angle)
-        # print(rotated_edge)
-        # print(rotation_angle)
 
         oriented_edges.append(rotated_edge)
         edge_orientations.append(orientation_code)
-    # print(len(oriented_edges))
+
     return np.array(oriented_edges, dtype=object), edge_orientations
 
 

@@ -8,6 +8,7 @@ dependencies = [
     "geopandas>=1.0.1",
     "numpy>=2.2.4",
     "scipy>=1.15.2",
+    "tqdm>=4.67.1",
 ]
 
 [dependency-groups]
