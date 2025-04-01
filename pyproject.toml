@@ -1,15 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "buildingregulariser"
-version = "0.1.0"
-description = "Add your description here"
+dynamic = ["version"]
+description = "A Python library for regularizing building footprints in geospatial data. This library helps clean up and standardize building polygon geometries by aligning edges to principal directions."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "geopandas>=1.0.1",
     "numpy>=2.2.4",
     "scipy>=1.15.2",
-    "tqdm>=4.67.1",
 ]
+[tool.setuptools.dynamic]
+version = {attr = "buildingregulariser.__version__.__version__"}
+
 
 [dependency-groups]
 dev = [

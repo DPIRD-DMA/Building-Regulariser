@@ -1,6 +1,6 @@
 # Building Footprint Regularization
 
-A Python library for regularizing building footprints in geospatial data. This library helps clean up and standardize building polygon geometries by aligning edges to principal directions, correcting geometric irregularities.
+A Python library for regularizing building footprints in geospatial data. This library helps clean up and standardize building polygon geometries by aligning edges to principal directions.
 
 [![Python](https://img.shields.io/badge/Python-3.7%2B-blue)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
