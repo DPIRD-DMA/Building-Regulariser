@@ -4,7 +4,7 @@ Simplification algorithms for polygon regularization.
 Contains the Ramer-Douglas-Peucker algorithm implementation for line simplification.
 """
 
-from typing import Callable, List, Tuple, Union
+from typing import Callable
 
 import numpy as np
 
@@ -84,71 +84,3 @@ def _ramer_douglas_peucker_recursive(
     else:
         # If max distance is below epsilon, just use endpoints
         return np.vstack((points[0], points[-1]))
-
-
-# def _rdp_numpy_array(
-#     points_list: List[Union[List[float], np.ndarray, Tuple[float, float]]],
-#     epsilon: float,
-#     distance_func: Callable,
-# ) -> List[List[float]]:
-#     """
-#     RDP simplification for list of points (converts to numpy array internally)
-
-#     Parameters:
-#     -----------
-#     points_list : List of points
-#         List of points to simplify (each point can be list, tuple, or ndarray)
-#     epsilon : float
-#         Simplification threshold
-#     distance_func : function
-#         Function to calculate point-to-line distance
-
-#     Returns:
-#     --------
-#     List[List[float]]
-#         Simplified points as a list of coordinates
-#     """
-#     # Convert input to numpy array for processing
-#     points_array = np.array(points_list)
-
-#     # Apply the RDP algorithm
-#     simplified_array = _ramer_douglas_peucker_recursive(
-#         points_array, epsilon, distance_func
-#     )
-
-#     # Convert back to list format and ensure proper typing
-#     result = []
-#     for point in simplified_array:
-#         result.append(point.tolist() if isinstance(point, np.ndarray) else list(point))
-
-#     return result
-
-
-# def simplify_with_rdp(
-#     points: Union[
-#         np.ndarray, List[Union[List[float], Tuple[float, float], np.ndarray]]
-#     ],
-#     epsilon: float = 0,
-#     distance_func: Callable = point_to_line_distance,
-# ) -> Union[np.ndarray, List[List[float]]]:
-#     """
-#     Simplifies a given array of points using Ramer-Douglas-Peucker algorithm.
-
-#     Parameters:
-#     -----------
-#     points : numpy.ndarray or list of points
-#         Points to simplify
-#     epsilon : float
-#         Simplification threshold (higher = more simplification)
-#     distance_func : function
-#         Function to calculate point-to-line distance
-
-#     Returns:
-#     --------
-#     numpy.ndarray or List[List[float]]
-#         Simplified points in the same format as input (ndarray or list of lists)
-#     """
-#     if isinstance(points, np.ndarray):
-#         return _ramer_douglas_peucker_recursive(points, epsilon, distance_func)
-#     else:
-#         return _rdp_numpy_array(points, epsilon, distance_func)

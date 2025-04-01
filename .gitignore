@@ -1,2 +1,4 @@
 *.gpkg*
 *__pycache__*
+*.ipynb
+test.ipynb

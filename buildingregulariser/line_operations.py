@@ -116,13 +116,17 @@ def project_point_to_line(
         Coordinates of the projected point
     """
     # Calculate the projected point coordinates
+    eps = 1e-10
     x = (
         point_x * (line_x2 - line_x1) * (line_x2 - line_x1)
         + point_y * (line_y2 - line_y1) * (line_x2 - line_x1)
         + (line_x1 * line_y2 - line_x2 * line_y1) * (line_y2 - line_y1)
     ) / (
-        (line_x2 - line_x1) * (line_x2 - line_x1)
-        + (line_y2 - line_y1) * (line_y2 - line_y1)
+        (
+            (line_x2 - line_x1) * (line_x2 - line_x1)
+            + (line_y2 - line_y1) * (line_y2 - line_y1)
+        )
+        + eps
     )
 
     y = (
@@ -130,8 +134,11 @@ def project_point_to_line(
         + point_y * (line_y2 - line_y1) * (line_y2 - line_y1)
         + (line_x2 * line_y1 - line_x1 * line_y2) * (line_x2 - line_x1)
     ) / (
-        (line_x2 - line_x1) * (line_x2 - line_x1)
-        + (line_y2 - line_y1) * (line_y2 - line_y1)
+        (
+            (line_x2 - line_x1) * (line_x2 - line_x1)
+            + (line_y2 - line_y1) * (line_y2 - line_y1)
+        )
+        + eps
     )
 
     return (x, y)

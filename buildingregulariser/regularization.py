@@ -8,7 +8,6 @@ import warnings
 from typing import List
 
 import numpy as np
-from scipy.spatial.distance import directed_hausdorff
 from shapely.geometry import LinearRing, MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 
@@ -45,9 +44,10 @@ def regularize_coordinate_array(
     numpy.ndarray
         Regularized coordinates array
     """
+    # print(coordinates)
+
     # Analyze edges to find properties and main direction
     edge_data = analyze_edges(coordinates)
-    # print(edge_data)
     # Orient edges based on longest edge direction
     oriented_edges, edge_orientations = orient_edges(coordinates, edge_data)
     # Connect and regularize edges
@@ -101,7 +101,10 @@ def analyze_edges(simplified_coordinates: np.ndarray):
 
 
 def orient_edges(
-    simplified_coordinates: np.ndarray, edge_data: dict, allow_45: bool = True
+    simplified_coordinates: np.ndarray,
+    edge_data: dict,
+    allow_45: bool = True,
+    diagonal_threshold_reduction: float = 15.0,
 ):
     """
     Orient edges to be parallel or perpendicular (or optionally 45 degrees)
@@ -116,7 +119,10 @@ def orient_edges(
         'longest_edge_index', 'main_direction').
     allow_45 : bool, optional
         If True, allows edges to be oriented at 45-degree angles relative
-        to the main direction. Defaults to False (only parallel/perpendicular).
+        to the main direction. Defaults to True.
+    diagonal_threshold_reduction : float, optional
+        Angle in degrees to subtract from the 45-degree snapping thresholds,
+        making diagonal (45°) orientations less likely. Defaults to 15.0.
 
     Returns:
     --------
@@ -166,17 +172,38 @@ def orient_edges(
         orientation_code = 0
 
         if allow_45:
-            # Snap to the nearest multiple of 45 degrees
-            target_offset = round(diff_angle / 45.0) * 45.0
+            # Modified approach: Adjust the thresholds for 45-degree snapping
+            # For an angle to snap to 45 degrees, it must be within (45 - down_weight45) degrees
+            # of the 45-degree mark
 
-            # Determine orientation code based on the target offset
-            norm_target_offset = (
-                target_offset % 360
-            )  # Normalize to 0-360 range for checks
-            if abs(norm_target_offset % 90) < tolerance:  # Is it a multiple of 90?
-                orientation_code = 0 if abs(norm_target_offset % 180) < tolerance else 1
-            else:  # Must be a 45-degree diagonal
+            # Calculate how close we are to each of the key orientations
+            dist_to_0 = min(abs(diff_angle % 180), abs((diff_angle % 180) - 180))
+            dist_to_90 = min(abs((diff_angle % 180) - 90), abs((diff_angle % 180) - 90))
+            dist_to_45 = min(
+                abs((diff_angle % 180) - 45), abs((diff_angle % 180) - 135)
+            )
+
+            # Apply down-weighting to 45-degree angles
+            # This effectively shrinks the zone where angles snap to 45 degrees
+            if dist_to_45 <= (22.5 - diagonal_threshold_reduction):
+                # Close enough to 45/135/225/315 degrees (accounting for down-weighting)
+                angle_mod = diff_angle % 90
+                if angle_mod < 45:
+                    target_offset = (diff_angle // 90) * 90 + 45
+                else:
+                    target_offset = (diff_angle // 90 + 1) * 90 - 45
                 orientation_code = 2
+            elif dist_to_0 <= dist_to_90:
+                # Closer to 0/180 degrees
+                target_offset = round(diff_angle / 180.0) * 180.0
+                orientation_code = 0
+            else:
+                # Closer to 90/270 degrees
+                target_offset = round(diff_angle / 90.0) * 90.0
+                if abs(target_offset % 180) < tolerance:
+                    # If rounding diff_angle/90 gave 0 or 180, force to 90 or -90
+                    target_offset = 90.0 if diff_angle > 0 else -90.0
+                orientation_code = 1
 
         else:  # Original logic (refined): Snap only to nearest 90 degrees
             if abs(diff_angle) < 45.0:  # Closer to parallel/anti-parallel (0 or 180)
@@ -193,21 +220,22 @@ def orient_edges(
                 orientation_code = 1
 
         # Calculate the rotation angle needed to achieve the target orientation
-        # target_angle = main_direction + target_offset
-        # rotation = target_angle - azimuth
         # Calculate shortest rotation angle
         rotation_angle = (main_direction + target_offset - azimuth + 180) % 360 - 180
 
         # Perform rotation
         start_point = np.array(simplified_coordinates[start_idx], dtype=float)
         end_point = np.array(simplified_coordinates[end_idx], dtype=float)
+        # print(start_idx, end_idx)
 
         # Ensure rotate_edge function is available and imported
         rotated_edge = rotate_edge(start_point, end_point, rotation_angle)
+        # print(rotated_edge)
+        # print(rotation_angle)
 
         oriented_edges.append(rotated_edge)
         edge_orientations.append(orientation_code)
-
+    # print(len(oriented_edges))
     return np.array(oriented_edges, dtype=object), edge_orientations
 
 
@@ -252,6 +280,7 @@ def rotate_edge(start_point: np.ndarray, end_point: np.ndarray, rotation_angle: 
     return [np.array(rotated_start), np.array(rotated_end)]
 
 
+#     return regularized_points
 def connect_regularized_edges(
     oriented_edges: np.ndarray, edge_orientations: list, parallel_threshold: float
 ):
@@ -275,9 +304,10 @@ def connect_regularized_edges(
     regularized_points = []
     regularized_points.append(oriented_edges[0][0])
 
-    for i in range(len(oriented_edges) - 1):
+    # Process all edges including the connection between last and first edge
+    for i in range(len(oriented_edges)):
         current_index = i
-        next_index = i + 1 if i < len(oriented_edges) - 1 else 0
+        next_index = (i + 1) % len(oriented_edges)  # Wrap around to first edge
 
         current_edge_start = oriented_edges[current_index][0]
         current_edge_end = oriented_edges[current_index][1]
@@ -306,12 +336,6 @@ def connect_regularized_edges(
                 oriented_edges,
             )
             regularized_points.extend(new_points)
-
-    # Close the polygon
-    if len(regularized_points) > 0 and not np.array_equal(
-        regularized_points[0], regularized_points[-1]
-    ):
-        regularized_points.append(regularized_points[0])
 
     return regularized_points
 
@@ -440,43 +464,6 @@ def handle_parallel_edges(
         new_points.append(np.array(connecting_point2))
 
     return new_points
-
-
-def poly_poly_iou(poly_1: Polygon, poly_2: Polygon) -> float:
-    """
-    Calculate the Intersection over Union (IoU) between two polygons
-
-    Parameters:
-    -----------
-    poly_1 : shapely.geometry.Polygon
-        First polygon
-    poly_2 : shapely.geometry.Polygon
-        Second polygon
-
-    Returns:
-    --------
-    float
-        IoU value between 0 and 1
-    """
-    if poly_1.is_empty or poly_2.is_empty:
-        return 0.0
-    if not poly_1.is_valid or not poly_2.is_valid:
-        return 0.0
-    if not poly_1.intersects(poly_2):
-        return 0.0
-    intersection_area = poly_1.intersection(poly_2).area
-    union_area = poly_1.union(poly_2).area
-    return intersection_area / union_area if union_area > 0 else 0.0
-
-
-def hausdorff_ratio(poly1, poly2):
-    coords1 = np.array(poly1.exterior.coords)
-    coords2 = np.array(poly2.exterior.coords)
-
-    forward = directed_hausdorff(coords1, coords2)[0]
-    backward = directed_hausdorff(coords2, coords1)[0]
-
-    return max(forward, backward)
 
 
 def regularize_single_polygon(
