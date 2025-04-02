@@ -87,7 +87,7 @@ regularized = regularize_geodataframe(
 ```python
 regularized = regularize_geodataframe(
     buildings,
-    parallel_threshold=2.0,   # Higher values allow more edge alignment
+    parallel_threshold=2.0,   # Higher values allow less edge alignment
     simplify=True,
     simplify_tolerance=0.5,   # Controls simplification level
     allow_45_degree=True,     # Enable 45-degree angles
