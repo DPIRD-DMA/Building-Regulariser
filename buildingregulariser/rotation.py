@@ -1,9 +1,3 @@
-"""
-Rotation functions for geometric operations.
-
-Functions for rotating points clockwise and counterclockwise around a center point.
-"""
-
 import math
 from typing import Tuple, Union
 

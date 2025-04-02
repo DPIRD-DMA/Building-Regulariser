@@ -1,7 +1,3 @@
-"""
-Geometric utility functions for distance and angle calculations.
-"""
-
 import math
 from typing import Any, List, Tuple, Union
 

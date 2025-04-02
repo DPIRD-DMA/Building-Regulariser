@@ -1,9 +1,3 @@
-"""
-Core regularization algorithms for polygon simplification.
-
-Functions for regularizing coordinate arrays and polygons.
-"""
-
 import warnings
 from typing import List
 

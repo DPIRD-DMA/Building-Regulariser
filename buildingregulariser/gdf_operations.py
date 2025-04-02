@@ -1,120 +1,21 @@
-import warnings
 from functools import partial
 from multiprocessing import Pool
 from typing import Optional, Union
 
 import geopandas as gpd
+import pandas as pd
 import pyproj
-from pyproj import CRS
-from shapely.geometry.base import BaseGeometry
 
-from .regularization import process_geometry
-
-
-def cleanup_geometry(
-    result_geodataframe: gpd.GeoDataFrame, simplify_tolerance: float
-) -> gpd.GeoDataFrame:
-    """
-    Cleans up geometries in a GeoDataFrame.
-
-    Removes empty geometries, attempts to remove small slivers using buffer
-    operations, and simplifies geometries to remove redundant vertices.
-
-    Parameters:
-    -----------
-    result_geodataframe : geopandas.GeoDataFrame
-        GeoDataFrame with geometries to clean.
-    simplify_tolerance : float
-        Tolerance used for simplification and determining buffer size
-        for sliver removal.
-
-    Returns:
-    --------
-    geopandas.GeoDataFrame
-        GeoDataFrame with cleaned geometries.
-    """
-    # Remove empty geometries before buffering
-    result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
-    if result_geodataframe.empty:
-        return result_geodataframe  # Return early if GDF is empty
-
-    # Define buffer size based on simplify tolerance
-    buffer_size = simplify_tolerance / 50
-
-    # Attempt to remove small slivers using a sequence of buffer operations
-    # Positive buffer -> negative buffer -> positive buffer
-    result_geodataframe["geometry"] = result_geodataframe.geometry.buffer(
-        buffer_size, cap_style="square", join_style="mitre"
-    )
-    result_geodataframe["geometry"] = result_geodataframe.geometry.buffer(
-        buffer_size * -2, cap_style="square", join_style="mitre"
-    )
-    result_geodataframe["geometry"] = result_geodataframe.geometry.buffer(
-        buffer_size, cap_style="square", join_style="mitre"
-    )
-
-    # Remove any geometries that became empty after buffering
-    result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
-    if result_geodataframe.empty:
-        return result_geodataframe  # Return early if GDF is empty
-
-    # Simplify to remove collinear vertices introduced by buffering/regularization
-    # Use a small tolerance related to the buffer size
-    result_geodataframe["geometry"] = result_geodataframe.geometry.simplify(
-        tolerance=buffer_size, preserve_topology=True
-    )
-    # Final check for empty geometries after simplification
-    result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
-
-    return result_geodataframe
-
-
-def process_geometry_wrapper(
-    geom: BaseGeometry,
-    parallel_threshold: float,
-    allow_45_degree: bool,
-    allow_circles: bool,
-    circle_threshold: float,
-) -> Optional[BaseGeometry]:
-    """
-    Wrapper function for `process_geometry` for use with multiprocessing.
-
-    Includes basic error handling to prevent single geometry failures from
-    stopping the entire pool.
-
-    Parameters:
-    -----------
-    geom : shapely.geometry.BaseGeometry
-        The input geometry to process.
-    parallel_threshold : float
-        Distance threshold for handling parallel lines in regularization.
-    allow_45_degree : bool
-        Flag to allow 45-degree angles during regularization.
-    allow_circles : bool
-        Flag to allow detection and replacement of polygons with circles.
-    circle_threshold : float
-        IOU threshold to consider a polygon a circle.
-
-    Returns:
-    --------
-    Optional[shapely.geometry.BaseGeometry]
-        The processed geometry, or None if an error occurred during processing.
-    """
-    try:
-        return process_geometry(
-            geom, parallel_threshold, allow_45_degree, allow_circles, circle_threshold
-        )
-    except Exception as e:
-        # Warn about the error but allow other processes to continue
-        warnings.warn(
-            f"Error processing geometry in parallel worker: {e}. Skipping geometry."
-        )
-        return None  # Return None to indicate failure for this geometry
+from .chunk_processing import (
+    get_chunk_size,
+    process_geometry_wrapper,
+    split_gdf,
+)
 
 
 def regularize_geodataframe(
     geodataframe: gpd.GeoDataFrame,
-    parallel_threshold: float = 1.0,  # Default value was 1 in docstring but not in signature
+    parallel_threshold: float = 1.0,
     target_crs: Optional[Union[str, pyproj.CRS]] = None,
     simplify: bool = True,
     simplify_tolerance: float = 0.5,
@@ -169,104 +70,44 @@ def regularize_geodataframe(
     """
     # Make a copy to avoid modifying the original GeoDataFrame
     result_geodataframe = geodataframe.copy()
+    # split gdf into chunks for parallel processing
+    chunk_size = get_chunk_size(
+        item_count=len(result_geodataframe), num_cores=num_cores
+    )
+    gdf_chunks = split_gdf(result_geodataframe, chunk_size=chunk_size)
 
-    # Check if input has CRS defined, warn if not
-    if result_geodataframe.crs is None:
-        warnings.warn(
-            "Input GeoDataFrame has no CRS defined. Assuming planar coordinates."
-        )
-
-    # Store original CRS for potential reprojection back at the end
-    original_crs = result_geodataframe.crs
-
-    # Reproject to target CRS if specified
-    if target_crs is not None:
-        result_geodataframe = result_geodataframe.to_crs(target_crs)
-
-    # Check if the CRS used for processing is projected, warn if not
-    # Use the potentially reprojected CRS
-    current_crs = result_geodataframe.crs
-    if current_crs:  # Check if CRS exists before trying to use it
-        crs_obj = CRS.from_user_input(current_crs)
-        if not crs_obj.is_projected:
-            warnings.warn(
-                f"GeoDataFrame is in a geographic CRS ('{current_crs.name}') during processing. "
-                "Angle and distance calculations may be inaccurate. Consider setting "
-                "`target_crs` to a suitable projected CRS."
+    if num_cores == 1:
+        # Process each chunk sequentially
+        processed_chunks = [
+            process_geometry_wrapper(
+                chunk,
+                target_crs=target_crs,
+                simplify=simplify,
+                simplify_tolerance=simplify_tolerance,
+                parallel_threshold=parallel_threshold,
+                allow_45_degree=allow_45_degree,
+                allow_circles=allow_circles,
+                circle_threshold=circle_threshold,
             )
-
-    # Apply initial simplification if requested
-    if simplify:
-        result_geodataframe.geometry = result_geodataframe.simplify(
-            tolerance=simplify_tolerance, preserve_topology=True
-        )
-        # Remove geometries that might become invalid after simplification
-        result_geodataframe = result_geodataframe[result_geodataframe.geometry.is_valid]
-        result_geodataframe = result_geodataframe[
-            ~result_geodataframe.geometry.is_empty
+            for chunk in gdf_chunks
         ]
-        if result_geodataframe.empty:
-            warnings.warn("GeoDataFrame became empty after initial simplification.")
-            return result_geodataframe  # Return early if empty
-
-    # Create the partial function for processing geometries
-    processing_func = partial(
-        process_geometry_wrapper,  # Use the safe wrapper
-        parallel_threshold=parallel_threshold,
-        allow_45_degree=allow_45_degree,
-        allow_circles=allow_circles,
-        circle_threshold=circle_threshold,
-    )
-
-    # Apply the regularization function, using parallel processing if num_cores > 1
-    if (
-        num_cores > 1 and len(result_geodataframe) > num_cores
-    ):  # Basic check if parallelization is useful
+    else:
         with Pool(processes=num_cores) as pool:
-            # Adjust chunksize based on typical geometry complexity and number of geometries
-            chunk_size = max(1, min(100, len(result_geodataframe) // (num_cores * 2)))
-            results = list(
-                pool.imap_unordered(
-                    processing_func, result_geodataframe.geometry, chunksize=chunk_size
-                )
+            # Use partial to pass additional arguments to the worker function
+            process_geometry_partial = partial(
+                process_geometry_wrapper,
+                target_crs=target_crs,
+                simplify=simplify,
+                simplify_tolerance=simplify_tolerance,
+                parallel_threshold=parallel_threshold,
+                allow_45_degree=allow_45_degree,
+                allow_circles=allow_circles,
+                circle_threshold=circle_threshold,
             )
-        result_geodataframe["geometry"] = results
-        # Filter out None results from processing errors
-        result_geodataframe = result_geodataframe[result_geodataframe.geometry.notna()]
+            # Process each chunk in parallel
+            processed_chunks = pool.map(process_geometry_partial, gdf_chunks)
 
-    else:  # Single core processing
-        if num_cores > 1:
-            warnings.warn(
-                f"num_cores > 1 but GeoDataFrame size ({len(result_geodataframe)}) is small, using single core."
-            )
-        print("Starting regularization using single core...")
-        # Use apply directly (casting necessary for type checker)
-        result_geodataframe["geometry"] = result_geodataframe.geometry.apply(
-            lambda geom: processing_func(geom)  # type: ignore
-        )
-        # Filter out None results from processing errors
-        result_geodataframe = result_geodataframe[result_geodataframe.geometry.notna()]
-        print("Single core processing finished.")
-
-    if result_geodataframe.empty:
-        warnings.warn("GeoDataFrame became empty after regularization processing.")
-        return result_geodataframe  # Return early if empty
-
-    # Clean up the resulting geometries (remove slivers, simplify)
-    result_geodataframe = cleanup_geometry(
-        result_geodataframe=result_geodataframe, simplify_tolerance=simplify_tolerance
+    result_geodataframe = gpd.GeoDataFrame(
+        pd.concat(processed_chunks, ignore_index=True), crs=result_geodataframe.crs
     )
-
-    if result_geodataframe.empty:
-        warnings.warn("GeoDataFrame became empty after geometry cleanup.")
-        return result_geodataframe  # Return early if empty
-
-    # Reproject back to the original CRS if it was changed
-    if target_crs is not None and original_crs is not None:
-        # Check if CRS are actually different before reprojecting
-        if not CRS.from_user_input(result_geodataframe.crs).equals(
-            CRS.from_user_input(original_crs)
-        ):
-            result_geodataframe = result_geodataframe.to_crs(original_crs)
-
     return result_geodataframe

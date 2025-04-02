@@ -1,10 +1,3 @@
-"""
-Line operations for geometric calculations.
-
-Functions for creating line equations, calculating intersections,
-and working with parallel lines.
-"""
-
 from typing import Tuple, Union
 
 import numpy as np
