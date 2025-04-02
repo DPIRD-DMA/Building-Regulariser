@@ -21,49 +21,241 @@ from .line_operations import (
 from .rotation import rotate_point_clockwise, rotate_point_counterclockwise
 
 
+def find_nearest_target_angle(
+    current_azimuth: float, main_direction: float, allow_45_degree: bool
+) -> float:
+    """
+    Finds the closest allowed target azimuth angle (0-360).
+    """
+    # Calculate angular difference relative to main_direction, normalize to [-180, 180]
+    diff_angle = (current_azimuth - main_direction + 180) % 360 - 180
+
+    # Define potential offsets from the main direction
+    allowed_offsets = []
+    if allow_45_degree:
+        # Use offsets like 0, 45, 90, 135, 180, -45, -90, -135
+        # Note: 180 and -180 are equivalent, 225 is -135, 270 is -90, 315 is -45
+        allowed_offsets = [0.0, 45.0, 90.0, 135.0, 180.0, -45.0, -90.0, -135.0]
+    else:
+        # Use offsets 0, 90, 180, -90 (or 270)
+        allowed_offsets = [0.0, 90.0, 180.0, -90.0]
+
+    # Find the offset that minimizes the absolute difference to diff_angle
+    best_offset = 0.0
+    min_angle_dist = 181.0  # Start with a value larger than max possible diff (180)
+
+    for offset in allowed_offsets:
+        # Calculate the shortest angle between diff_angle and the current offset
+        d = (diff_angle - offset + 180) % 360 - 180
+        if abs(d) < min_angle_dist:
+            min_angle_dist = abs(d)
+            best_offset = offset
+
+    # Calculate the final target azimuth by adding the best offset to the main direction
+    # Normalize to [0, 360)
+    target_azimuth = (main_direction + best_offset + 360) % 360
+    return target_azimuth
+
+
+def enforce_angles_post_process(
+    points: List[np.ndarray],
+    main_direction: float,
+    allow_45_degree: bool,
+    angle_tolerance: float = 0.1,  # Tolerance in degrees
+    max_iterations: int = 2,  # Number of passes to allow adjustments to settle
+) -> List[np.ndarray]:
+    """
+    Adjusts vertices iteratively to enforce target angles for each segment.
+    Runs multiple iterations as adjusting one segment can affect adjacent ones.
+
+    Parameters:
+    -----------
+    points : list[np.ndarray]
+        List of numpy arrays representing polygon vertices. Assumed NOT closed
+        (last point != first point). Length N >= 3.
+    main_direction : float
+        The main direction angle in degrees (0-360).
+    allow_45_degree : bool
+        Whether to allow 45-degree angles.
+    angle_tolerance : float
+         Allowable deviation from target angle in degrees.
+    max_iterations : int
+         Maximum number of full passes to adjust angles.
+
+    Returns:
+    --------
+    list[np.ndarray]
+        List of adjusted vertices (N points).
+    """
+    if len(points) < 3:
+        return points  # Not enough points to form segments
+
+    adjusted_points = [p.copy() for p in points]  # Work on a copy
+    num_points = len(adjusted_points)
+
+    for iteration in range(max_iterations):
+        max_angle_diff_this_iter = 0.0
+        changed = False  # Flag to track if any changes were made in this iteration
+
+        for i in range(num_points):
+            p1_idx = i
+            p2_idx = (i + 1) % num_points  # Wrap around for the end point index
+
+            p1 = adjusted_points[p1_idx]
+            p2 = adjusted_points[p2_idx]
+
+            # Avoid issues with coincident points before calculating angle
+            dist = calculate_distance(p1, p2)
+            if dist < 1e-7:
+                # Coincident points have undefined angle, skip adjustment for this segment
+                continue
+
+            current_azimuth = calculate_azimuth_angle(p1, p2)
+            target_azimuth = find_nearest_target_angle(
+                current_azimuth, main_direction, allow_45_degree
+            )
+
+            # Calculate shortest rotation angle needed (positive for counter-clockwise)
+            rotation_diff = (target_azimuth - current_azimuth + 180) % 360 - 180
+
+            # Track the maximum deviation found in this iteration
+            max_angle_diff_this_iter = max(max_angle_diff_this_iter, abs(rotation_diff))
+
+            # Only rotate if the difference significantly exceeds tolerance
+            # Use a slightly larger threshold for making changes to prevent jitter
+            if abs(rotation_diff) > angle_tolerance:
+                changed = True  # Mark that an adjustment was made
+                # Rotate p2 around p1
+                # Pass tuples to rotation functions (assuming they expect tuples)
+                p1_rot = tuple(p1)
+                p2_rot = tuple(p2)
+
+                # Perform rotation (rotation_diff > 0 means counter-clockwise)
+                if rotation_diff > 0:
+                    new_p2_tuple = rotate_point_counterclockwise(
+                        p2_rot, p1_rot, rotation_diff
+                    )
+                else:
+                    new_p2_tuple = rotate_point_clockwise(
+                        p2_rot, p1_rot, abs(rotation_diff)
+                    )
+
+                # Update the endpoint in the list for the *next* segment's calculation
+                adjusted_points[p2_idx] = np.array(new_p2_tuple)
+
+        # Check for convergence: If no points were adjusted significantly in this pass, stop.
+        if not changed:
+            # print(f"Angle enforcement converged after {iteration + 1} iterations.")
+            break
+
+    # Return the list of N adjusted unique points
+    return adjusted_points
+
+
 def regularize_coordinate_array(
-    coordinates: np.ndarray, parallel_threshold: float = 3
+    coordinates: np.ndarray,
+    parallel_threshold: float = 3,
+    allow_45_degree: bool = True,
+    angle_enforcement_tolerance: float = 0.1,  # Add tolerance parameter
 ) -> np.ndarray:
     """
     Regularize polygon coordinates by aligning edges to be either parallel
-    or perpendicular to the longest edge
+    or perpendicular (or 45 deg) to the main direction, with a
+    post-processing step to enforce angles.
 
     Parameters:
     -----------
     coordinates : numpy.ndarray
-        Array of coordinates for a polygon ring (shape: n x 2)
-    epsilon : float
-        Parameter for Ramer-Douglas-Peucker algorithm (higher = more simplification)
+        Array of coordinates for a polygon ring (shape: n x 2).
+        Assumed closed (first point == last point).
     parallel_threshold : float
-        Distance threshold for considering parallel lines as needing connection
+        Distance threshold for considering parallel lines as needing connection.
+    allow_45_degree : bool
+        If True, allows 45-degree orientations relative to the main direction.
+    angle_enforcement_tolerance : float
+        Maximum allowed deviation (degrees) from target angle in the final output.
 
     Returns:
     --------
     numpy.ndarray
-        Regularized coordinates array
+        Regularized coordinates array (n x 2), closed (first == last).
     """
-    # print(coordinates)
+    if (
+        len(coordinates) < 4
+    ):  # Need at least 3 unique points + closing point for a polygon
+        warnings.warn("Not enough coordinates to regularize. Returning original.")
+        return coordinates
+
+    # Remove duplicate closing point for processing, if present
+    if np.allclose(coordinates[0], coordinates[-1]):
+        processing_coords = coordinates[:-1]
+    else:
+        processing_coords = coordinates  # Assume it wasn't closed
+
+    if len(processing_coords) < 3:
+        warnings.warn(
+            "Not enough unique coordinates to regularize. Returning original."
+        )
+        return coordinates  # Return original closed coords
 
     # Analyze edges to find properties and main direction
-    edge_data = analyze_edges(coordinates)
-    # Orient edges based on longest edge direction
-    oriented_edges, edge_orientations = orient_edges(coordinates, edge_data)
+    # Use the non-closed version for edge analysis
+    edge_data = analyze_edges(processing_coords)
+
+    # Orient edges based on main direction
+    oriented_edges, edge_orientations = orient_edges(
+        processing_coords, edge_data, allow_45_degree=allow_45_degree
+    )
+
     # Connect and regularize edges
-    regularized_points = connect_regularized_edges(
+    # This returns a list of np.ndarray points, likely NOT closed
+    initial_regularized_points = connect_regularized_edges(
         oriented_edges, edge_orientations, parallel_threshold
     )
 
-    return np.array(regularized_points, dtype=object)
+    if not initial_regularized_points or len(initial_regularized_points) < 3:
+        warnings.warn("Regularization resulted in too few points. Returning original.")
+        # Decide what to return: maybe the simplified input or original?
+        # Returning original for safety:
+        return coordinates
+
+    # *** NEW: Post-processing step to enforce angles ***
+    final_regularized_points_list = enforce_angles_post_process(
+        initial_regularized_points,
+        edge_data["main_direction"],
+        allow_45_degree,
+        angle_tolerance=angle_enforcement_tolerance,
+    )
+
+    if not final_regularized_points_list or len(final_regularized_points_list) < 3:
+        warnings.warn(
+            "Angle enforcement resulted in too few points. Returning original."
+        )
+        return coordinates
+
+    # Convert list of arrays back to a single numpy array and ensure closure
+    final_coords_array = np.array([p for p in final_regularized_points_list])
+    # Ensure the final array is explicitly closed for Shapely
+    closed_final_coords = np.vstack([final_coords_array, final_coords_array[0]])
+
+    return closed_final_coords  # Return the closed array
 
 
-def analyze_edges(simplified_coordinates: np.ndarray):
+# In regularization.py
+
+
+def analyze_edges(coordinates: np.ndarray):  # Expects unclosed coordinates (N x 2)
     """
-    Analyze edges to find their lengths, angles, and indices
+    Analyze edges to find their lengths, angles, and identify the main direction
+    based on angle distribution, optimized for buildings where most lines are
+    perpendicular or parallel.
+
+    Handles wrap-around for the segment connecting the last point to the first.
 
     Parameters:
     -----------
-    simplified_coordinates : numpy.ndarray
-        Simplified polygon coordinates
+    coordinates : numpy.ndarray
+        Polygon coordinates (shape: N x 2), assumed NOT closed.
 
     Returns:
     --------
@@ -73,40 +265,129 @@ def analyze_edges(simplified_coordinates: np.ndarray):
     edge_lengths = []
     azimuth_angles = []
     edge_indices = []
+    num_points = len(coordinates)
 
-    for i in range(len(simplified_coordinates) - 1):
-        current_point = simplified_coordinates[i]
-        next_point = simplified_coordinates[i + 1]
+    if num_points < 3:
+        # Return empty or default data if not enough points for a polygon
+        return {
+            "edge_lengths": [],
+            "azimuth_angles": [],
+            "edge_indices": [],
+            "longest_edge_index": -1,
+            "main_direction": 0,
+            "angle_distribution": [],
+        }
+
+    for i in range(num_points):
+        current_idx = i
+        next_idx = (i + 1) % num_points  # Handles wrap-around: N-1 -> 0
+
+        current_point = coordinates[current_idx]
+        next_point = coordinates[next_idx]
 
         edge_length = calculate_distance(current_point, next_point)
+        # Check for coincident points before calculating azimuth
+        if edge_length < 1e-9:  # Use a small tolerance
+            # Optionally skip this edge or handle as needed
+            warnings.warn(
+                f"Skipping zero-length edge between index {current_idx} and {next_idx}"
+            )
+            continue  # Skip this degenerate edge
+
         azimuth = calculate_azimuth_angle(current_point, next_point)
 
+        # Only include edges with meaningful length
+        # if edge_length > 0.001: # Keep your original threshold or adjust
         edge_lengths.append(edge_length)
         azimuth_angles.append(azimuth)
-        edge_indices.append([i, i + 1])
+        # Store the indices used for this edge
+        edge_indices.append([current_idx, next_idx])
 
-    # Find longest edge and use its direction as main direction
-    longest_edge_index = np.argmax(edge_lengths)
-    main_direction = azimuth_angles[longest_edge_index]
+    # --- Rest of the angle analysis logic remains the same ---
+    # (Using the collected azimuth_angles and edge_lengths)
+
+    # Handle case where no valid edges were found
+    if not edge_lengths:
+        return {
+            "edge_lengths": [],
+            "azimuth_angles": [],
+            "edge_indices": [],
+            "longest_edge_index": -1,
+            "main_direction": 0,
+            "angle_distribution": [],
+        }
+
+    # Normalize angles...
+    normalized_angles = [angle % 180 for angle in azimuth_angles]
+    orthogonal_angles = [angle % 90 for angle in normalized_angles]
+
+    # Create histogram bins...
+    bin_size = 5
+    num_bins = int(90 // bin_size)
+    angle_bins = [0] * num_bins
+
+    # Count angles...
+    for angle, length in zip(orthogonal_angles, edge_lengths):
+        # Ensure bin_index is within bounds (can happen if angle is exactly 90)
+        bin_index = min(int(angle // bin_size), num_bins - 1)
+        angle_bins[bin_index] += length
+
+    # Find dominant direction...
+    # Check if angle_bins is empty or all zeros
+    if not angle_bins or all(count == 0 for count in angle_bins):
+        main_direction = 0  # Default direction if no clear signal
+        warnings.warn("Could not determine main direction from angle distribution.")
+    else:
+        main_bin = np.argmax(angle_bins)
+        raw_main_direction = (main_bin * bin_size) + (bin_size / 2)
+
+        # Determine final main direction (0-90 or 90-180 range)...
+        direction1 = raw_main_direction
+        direction2 = (raw_main_direction + 90) % 180
+        support1 = 0
+        support2 = 0
+        for angle, length in zip(normalized_angles, edge_lengths):
+            dist1 = min(
+                abs(angle - direction1),
+                abs(angle - direction1 - 180),
+                abs(angle - direction1 + 180),
+            )
+            dist2 = min(
+                abs(angle - direction2),
+                abs(angle - direction2 - 180),
+                abs(angle - direction2 + 180),
+            )
+            if dist1 <= dist2:  # Give slight preference to dir1 in case of tie
+                support1 += length
+            else:
+                support2 += length
+        main_direction = direction1 if support1 >= support2 else direction2
+
+    # Find longest edge index (relative to the filtered edge_lengths list)
+    longest_edge_idx_in_list = np.argmax(edge_lengths) if edge_lengths else -1
+    # The actual index pair can be retrieved using edge_indices[longest_edge_idx_in_list] if needed
 
     return {
         "edge_lengths": edge_lengths,
         "azimuth_angles": azimuth_angles,
-        "edge_indices": edge_indices,
-        "longest_edge_index": longest_edge_index,
+        "edge_indices": edge_indices,  # These indices now correctly refer to the input 'coordinates' array
+        "longest_edge_index": longest_edge_idx_in_list,  # Index within the 'edge_lengths' list
         "main_direction": main_direction,
+        "angle_distribution": list(
+            zip([i * bin_size + bin_size / 2 for i in range(num_bins)], angle_bins)
+        ),
     }
 
 
 def orient_edges(
     simplified_coordinates: np.ndarray,
     edge_data: dict,
-    allow_45: bool = True,
+    allow_45_degree: bool = True,
     diagonal_threshold_reduction: float = 15.0,
 ):
     """
     Orient edges to be parallel or perpendicular (or optionally 45 degrees)
-    to the main direction.
+    to the main direction determined by angle distribution analysis.
 
     Parameters:
     -----------
@@ -114,8 +395,8 @@ def orient_edges(
         Simplified polygon coordinates (shape: n x 2, assumed closed).
     edge_data : dict
         Dictionary containing edge analysis data ('azimuth_angles', 'edge_indices',
-        'longest_edge_index', 'main_direction').
-    allow_45 : bool, optional
+        'main_direction').
+    allow_45_degree : bool, optional
         If True, allows edges to be oriented at 45-degree angles relative
         to the main direction. Defaults to True.
     diagonal_threshold_reduction : float, optional
@@ -132,13 +413,14 @@ def orient_edges(
           - 1: Perpendicular (90, 270 deg relative to main_direction)
           - 2: Diagonal (45, 135, 225, 315 deg relative to main_direction) - only if allow_45=True.
     """
+
+    # edge_data =
     oriented_edges = []
     # Orientation codes: 0=Parallel/AntiParallel, 1=Perpendicular, 2=Diagonal(45deg)
     edge_orientations = []
 
     azimuth_angles = edge_data["azimuth_angles"]
     edge_indices = edge_data["edge_indices"]
-    longest_edge_index = edge_data["longest_edge_index"]
     main_direction = edge_data["main_direction"]
 
     # Small tolerance for floating point comparisons
@@ -147,19 +429,6 @@ def orient_edges(
     for i, (azimuth, (start_idx, end_idx)) in enumerate(
         zip(azimuth_angles, edge_indices)
     ):
-        if i == longest_edge_index:
-            # Keep longest edge as is
-            oriented_edges.append(
-                [
-                    np.array(simplified_coordinates[start_idx]),
-                    np.array(simplified_coordinates[end_idx]),
-                ]
-            )
-            edge_orientations.append(0)  # Parallel to main direction
-            continue  # Skip to next edge
-
-        # --- Handle non-longest edges ---
-
         # Calculate the shortest angle difference from edge azimuth to main_direction
         # Result is in the range [-180, 180]
         diff_angle = (azimuth - main_direction + 180) % 360 - 180
@@ -169,11 +438,7 @@ def orient_edges(
         )
         orientation_code = 0
 
-        if allow_45:
-            # Modified approach: Adjust the thresholds for 45-degree snapping
-            # For an angle to snap to 45 degrees, it must be within (45 - down_weight45) degrees
-            # of the 45-degree mark
-
+        if allow_45_degree:
             # Calculate how close we are to each of the key orientations
             dist_to_0 = min(abs(diff_angle % 180), abs((diff_angle % 180) - 180))
             dist_to_90 = min(abs((diff_angle % 180) - 90), abs((diff_angle % 180) - 90))
@@ -190,7 +455,16 @@ def orient_edges(
                     target_offset = (diff_angle // 90) * 90 + 45
                 else:
                     target_offset = (diff_angle // 90 + 1) * 90 - 45
-                orientation_code = 2
+
+                # Determine which diagonal direction we're closer to
+                # Use modulo 180 to differentiate between 45/225 and 135/315
+                normalized_angle = (main_direction + target_offset) % 180
+                if 0 <= normalized_angle < 90:
+                    # This is closer to 45 degrees
+                    orientation_code = 2  # 45/225 degrees
+                else:
+                    # This is closer to 135 degrees
+                    orientation_code = 3  # 135/315 degrees
             elif dist_to_0 <= dist_to_90:
                 # Closer to 0/180 degrees
                 target_offset = round(diff_angle / 180.0) * 180.0
@@ -225,7 +499,7 @@ def orient_edges(
         start_point = np.array(simplified_coordinates[start_idx], dtype=float)
         end_point = np.array(simplified_coordinates[end_idx], dtype=float)
 
-        # Ensure rotate_edge function is available and imported
+        # Rotate the edge to align with the target orientation
         rotated_edge = rotate_edge(start_point, end_point, rotation_angle)
 
         oriented_edges.append(rotated_edge)
@@ -297,7 +571,6 @@ def connect_regularized_edges(
         List of regularized points forming the polygon
     """
     regularized_points = []
-    regularized_points.append(oriented_edges[0][0])
 
     # Process all edges including the connection between last and first edge
     for i in range(len(oriented_edges)):
@@ -464,6 +737,9 @@ def handle_parallel_edges(
 def regularize_single_polygon(
     polygon: Polygon,
     parallel_threshold: float = 3,
+    allow_45_degree: bool = True,
+    allow_circles: bool = True,
+    circle_threshold: float = 0.90,
 ) -> Polygon:
     """
     Regularize a Shapely polygon by aligning edges to principal directions
@@ -472,8 +748,6 @@ def regularize_single_polygon(
     -----------
     polygon : shapely.geometry.Polygon
         Input polygon to regularize
-    epsilon : float
-        Parameter for Ramer-Douglas-Peucker algorithm (higher = more simplification)
     parallel_threshold : float
         Distance threshold for parallel line handling
 
@@ -490,15 +764,35 @@ def regularize_single_polygon(
 
     # print(exterior_coordinates)
     regularized_exterior = regularize_coordinate_array(
-        exterior_coordinates, parallel_threshold=parallel_threshold
+        exterior_coordinates,
+        parallel_threshold=parallel_threshold,
+        allow_45_degree=allow_45_degree,
     )
+    # print(regularized_exterior)
+    if allow_circles:
+        area = polygon.area
+        centroid = polygon.centroid
+        radius = np.sqrt(area / np.pi)
+        perfect_circle = centroid.buffer(radius, resolution=42)
+        # Check if the polygon is close to a circle using iou
+        iou = (
+            perfect_circle.intersection(polygon).area
+            / perfect_circle.union(polygon).area
+        )
+        if iou > circle_threshold:
+            # If the polygon is close to a circle, return the perfect circle
+            regularized_exterior = np.array(
+                perfect_circle.exterior.coords, dtype=object
+            )
 
     # Handle interior rings (holes)
     regularized_interiors: List[np.ndarray] = []
     for interior in polygon.interiors:
         interior_coordinates = np.array(interior.coords)
         regularized_interior = regularize_coordinate_array(
-            interior_coordinates, parallel_threshold=parallel_threshold
+            interior_coordinates,
+            parallel_threshold=parallel_threshold,
+            allow_45_degree=allow_45_degree,
         )
         regularized_interiors.append(regularized_interior)
 
@@ -517,7 +811,13 @@ def regularize_single_polygon(
         return polygon
 
 
-def process_geometry(geometry: BaseGeometry, parallel_threshold: float) -> BaseGeometry:
+def process_geometry(
+    geometry: BaseGeometry,
+    parallel_threshold: float,
+    allow_45_degree: bool,
+    allow_circles: bool,
+    circle_threshold: float,
+) -> BaseGeometry:
     """
     Process a single geometry, handling different geometry types
 
@@ -525,8 +825,6 @@ def process_geometry(geometry: BaseGeometry, parallel_threshold: float) -> BaseG
     -----------
     geometry : shapely.geometry.BaseGeometry
         Input geometry to regularize
-    epsilon : float
-        Parameter for Ramer-Douglas-Peucker algorithm
     parallel_threshold : float
         Distance threshold for parallel line handling
 
@@ -536,10 +834,22 @@ def process_geometry(geometry: BaseGeometry, parallel_threshold: float) -> BaseG
         Regularized geometry
     """
     if isinstance(geometry, Polygon):
-        return regularize_single_polygon(geometry, parallel_threshold)
+        return regularize_single_polygon(
+            polygon=geometry,
+            parallel_threshold=parallel_threshold,
+            allow_45_degree=allow_45_degree,
+            allow_circles=allow_circles,
+            circle_threshold=circle_threshold,
+        )
     elif isinstance(geometry, MultiPolygon):
         regularized_parts = [
-            regularize_single_polygon(part, parallel_threshold)
+            regularize_single_polygon(
+                polygon=part,
+                parallel_threshold=parallel_threshold,
+                allow_45_degree=allow_45_degree,
+                allow_circles=allow_circles,
+                circle_threshold=circle_threshold,
+            )
             for part in geometry.geoms
         ]
         return MultiPolygon(regularized_parts)
