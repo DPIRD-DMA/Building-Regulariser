@@ -71,27 +71,23 @@ def regularize_geodataframe(
     # Make a copy to avoid modifying the original GeoDataFrame
     result_geodataframe = geodataframe.copy()
     # split gdf into chunks for parallel processing
-    chunk_size = get_chunk_size(
-        item_count=len(result_geodataframe), num_cores=num_cores
-    )
-    gdf_chunks = split_gdf(result_geodataframe, chunk_size=chunk_size)
 
     if num_cores == 1:
-        # Process each chunk sequentially
-        processed_chunks = [
-            process_geometry_wrapper(
-                chunk,
-                target_crs=target_crs,
-                simplify=simplify,
-                simplify_tolerance=simplify_tolerance,
-                parallel_threshold=parallel_threshold,
-                allow_45_degree=allow_45_degree,
-                allow_circles=allow_circles,
-                circle_threshold=circle_threshold,
-            )
-            for chunk in gdf_chunks
-        ]
+        result_geodataframe = process_geometry_wrapper(
+            result_geodataframe=result_geodataframe,
+            target_crs=target_crs,
+            simplify=simplify,
+            simplify_tolerance=simplify_tolerance,
+            parallel_threshold=parallel_threshold,
+            allow_45_degree=allow_45_degree,
+            allow_circles=allow_circles,
+            circle_threshold=circle_threshold,
+        )
     else:
+        chunk_size = get_chunk_size(
+            item_count=len(result_geodataframe), num_cores=num_cores
+        )
+        gdf_chunks = split_gdf(result_geodataframe, chunk_size=chunk_size)
         with Pool(processes=num_cores) as pool:
             # Use partial to pass additional arguments to the worker function
             process_geometry_partial = partial(
@@ -107,7 +103,7 @@ def regularize_geodataframe(
             # Process each chunk in parallel
             processed_chunks = pool.map(process_geometry_partial, gdf_chunks)
 
-    result_geodataframe = gpd.GeoDataFrame(
-        pd.concat(processed_chunks, ignore_index=True), crs=result_geodataframe.crs
-    )
+        result_geodataframe = gpd.GeoDataFrame(
+            pd.concat(processed_chunks, ignore_index=True), crs=result_geodataframe.crs
+        )
     return result_geodataframe
