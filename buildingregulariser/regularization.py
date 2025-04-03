@@ -12,7 +12,7 @@ from .line_operations import (
     create_line_equation,
     project_point_to_line,
 )
-from .rotation import rotate_point_clockwise, rotate_point_counterclockwise
+from .rotation import rotate_point
 
 
 def find_nearest_target_angle(
@@ -126,13 +126,9 @@ def enforce_angles_post_process(
 
                 # Perform rotation (rotation_diff > 0 means counter-clockwise)
                 if rotation_diff > 0:
-                    new_p2_tuple = rotate_point_counterclockwise(
-                        p2_rot, p1_rot, rotation_diff
-                    )
+                    new_p2_tuple = rotate_point(p2_rot, p1_rot, -rotation_diff)
                 else:
-                    new_p2_tuple = rotate_point_clockwise(
-                        p2_rot, p1_rot, abs(rotation_diff)
-                    )
+                    new_p2_tuple = rotate_point(p2_rot, p1_rot, abs(rotation_diff))
 
                 # Update the endpoint in the list for the *next* segment's calculation
                 adjusted_points[p2_idx] = np.array(new_p2_tuple)
@@ -523,19 +519,11 @@ def rotate_edge(start_point: np.ndarray, end_point: np.ndarray, rotation_angle: 
     midpoint = (start_point + end_point) / 2
 
     if rotation_angle > 0:
-        rotated_start = rotate_point_counterclockwise(
-            start_point, midpoint, np.abs(rotation_angle)
-        )
-        rotated_end = rotate_point_counterclockwise(
-            end_point, midpoint, np.abs(rotation_angle)
-        )
+        rotated_start = rotate_point(start_point, midpoint, -rotation_angle)
+        rotated_end = rotate_point(end_point, midpoint, -rotation_angle)
     elif rotation_angle < 0:
-        rotated_start = rotate_point_clockwise(
-            start_point, midpoint, np.abs(rotation_angle)
-        )
-        rotated_end = rotate_point_clockwise(
-            end_point, midpoint, np.abs(rotation_angle)
-        )
+        rotated_start = rotate_point(start_point, midpoint, np.abs(rotation_angle))
+        rotated_end = rotate_point(end_point, midpoint, np.abs(rotation_angle))
     else:
         rotated_start = start_point
         rotated_end = end_point
@@ -764,10 +752,8 @@ def regularize_single_polygon(
     )
     # print(regularized_exterior)
     if allow_circles:
-        area = polygon.area
-        centroid = polygon.centroid
-        radius = np.sqrt(area / np.pi)
-        perfect_circle = centroid.buffer(radius, resolution=42)
+        radius = np.sqrt(polygon.area / np.pi)
+        perfect_circle = polygon.centroid.buffer(radius, resolution=42)
         # Check if the polygon is close to a circle using iou
         iou = (
             perfect_circle.intersection(polygon).area

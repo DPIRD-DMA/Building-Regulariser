@@ -100,6 +100,9 @@ def cleanup_geometry(
 
     # Remove any geometries that became empty after buffering
     result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
+
+    # result_geodataframe = remove_zigzag_patterns(result_geodataframe)
+
     if result_geodataframe.empty:
         return result_geodataframe  # Return early if GDF is empty
 
@@ -159,6 +162,13 @@ def process_geometry_wrapper(
         result_geodataframe = result_geodataframe[
             ~result_geodataframe.geometry.is_empty
         ]
+
+    #  Add segments to avoid larger errors with big buildings
+    result_geodataframe[result_geodataframe.geometry.name] = (
+        result_geodataframe.geometry.segmentize(
+            max_segment_length=simplify_tolerance * 5
+        )
+    )
 
     result_geodataframe["geometry"] = result_geodataframe.geometry.apply(
         lambda geometry: process_geometry(
