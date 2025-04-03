@@ -125,6 +125,7 @@ def process_geometry_wrapper(
     simplify_tolerance: float,
     parallel_threshold: float,
     allow_45_degree: bool,
+    diagonal_threshold_reduction: float,
     allow_circles: bool,
     circle_threshold: float,
 ):
@@ -176,6 +177,7 @@ def process_geometry_wrapper(
             geometry=geometry,
             parallel_threshold=parallel_threshold,
             allow_45_degree=allow_45_degree,
+            diagonal_threshold_reduction=diagonal_threshold_reduction,
             allow_circles=allow_circles,
             circle_threshold=circle_threshold,
         )  # type: ignore

@@ -141,7 +141,8 @@ def regularize_coordinate_array(
     coordinates: np.ndarray,
     parallel_threshold: float = 3,
     allow_45_degree: bool = True,
-    angle_enforcement_tolerance: float = 0.1,  # Add tolerance parameter
+    diagonal_threshold_reduction: float = 15.0,
+    angle_enforcement_tolerance: float = 0.1,
 ) -> np.ndarray:
     """
     Regularize polygon coordinates by aligning edges to be either parallel
@@ -189,7 +190,10 @@ def regularize_coordinate_array(
 
     # Orient edges based on main direction
     oriented_edges, edge_orientations = orient_edges(
-        processing_coords, edge_data, allow_45_degree=allow_45_degree
+        processing_coords,
+        edge_data,
+        allow_45_degree=allow_45_degree,
+        diagonal_threshold_reduction=diagonal_threshold_reduction,
     )
 
     # Connect and regularize edges
@@ -691,6 +695,7 @@ def regularize_single_polygon(
     polygon: Polygon,
     parallel_threshold: float = 3,
     allow_45_degree: bool = True,
+    diagonal_threshold_reduction: float = 15.0,
     allow_circles: bool = True,
     circle_threshold: float = 0.90,
 ) -> Polygon:
@@ -728,6 +733,7 @@ def regularize_single_polygon(
         exterior_coordinates,
         parallel_threshold=parallel_threshold,
         allow_45_degree=allow_45_degree,
+        diagonal_threshold_reduction=diagonal_threshold_reduction,
     )
     if allow_circles:
         radius = np.sqrt(polygon.area / np.pi)
@@ -773,6 +779,7 @@ def process_geometry(
     geometry: BaseGeometry,
     parallel_threshold: float,
     allow_45_degree: bool,
+    diagonal_threshold_reduction: float,
     allow_circles: bool,
     circle_threshold: float,
 ) -> BaseGeometry:
@@ -796,6 +803,7 @@ def process_geometry(
             polygon=geometry,
             parallel_threshold=parallel_threshold,
             allow_45_degree=allow_45_degree,
+            diagonal_threshold_reduction=diagonal_threshold_reduction,
             allow_circles=allow_circles,
             circle_threshold=circle_threshold,
         )
@@ -805,6 +813,7 @@ def process_geometry(
                 polygon=part,
                 parallel_threshold=parallel_threshold,
                 allow_45_degree=allow_45_degree,
+                diagonal_threshold_reduction=diagonal_threshold_reduction,
                 allow_circles=allow_circles,
                 circle_threshold=circle_threshold,
             )

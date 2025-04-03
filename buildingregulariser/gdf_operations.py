@@ -20,6 +20,7 @@ def regularize_geodataframe(
     simplify: bool = True,
     simplify_tolerance: float = 0.5,
     allow_45_degree: bool = True,
+    diagonal_threshold_reduction: float = 15,
     allow_circles: bool = True,
     circle_threshold: float = 0.9,
     num_cores: int = 1,
@@ -80,6 +81,7 @@ def regularize_geodataframe(
             simplify_tolerance=simplify_tolerance,
             parallel_threshold=parallel_threshold,
             allow_45_degree=allow_45_degree,
+            diagonal_threshold_reduction=diagonal_threshold_reduction,
             allow_circles=allow_circles,
             circle_threshold=circle_threshold,
         )
@@ -97,6 +99,7 @@ def regularize_geodataframe(
                 simplify_tolerance=simplify_tolerance,
                 parallel_threshold=parallel_threshold,
                 allow_45_degree=allow_45_degree,
+                diagonal_threshold_reduction=diagonal_threshold_reduction,
                 allow_circles=allow_circles,
                 circle_threshold=circle_threshold,
             )
