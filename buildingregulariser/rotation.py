@@ -1,12 +1,12 @@
 import math
-from typing import Tuple, Union
+from typing import Tuple
 
 import numpy as np
 
 
 def rotate_point(
-    point: Union[np.ndarray, Tuple[float, float]],
-    center: Union[np.ndarray, Tuple[float, float]],
+    point: np.ndarray,
+    center: np.ndarray,
     angle_degrees: float,
 ) -> Tuple[float, float]:
     """

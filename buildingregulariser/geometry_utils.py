@@ -1,12 +1,11 @@
 import math
-from typing import Any, List, Tuple, Union
 
 import numpy as np
 
 
 def calculate_distance(
-    point_1: Union[np.ndarray, List[float], Tuple[float, float], Any],
-    point_2: Union[np.ndarray, List[float], Tuple[float, float], Any],
+    point_1: np.ndarray,
+    point_2: np.ndarray,
 ) -> float:
     """
     Calculate Euclidean distance between two points.
@@ -23,15 +22,12 @@ def calculate_distance(
     float
         Euclidean distance
     """
-    # Convert inputs to numpy arrays if they aren't already
-    p1 = np.array(point_1, dtype=float)
-    p2 = np.array(point_2, dtype=float)
-    return np.sqrt(np.sum(np.power((p1 - p2), 2)))
+    return np.sqrt(np.sum(np.power((point_1 - point_2), 2)))
 
 
 def calculate_azimuth_angle(
-    start_point: Union[np.ndarray, List[float], Tuple[float, float], Any],
-    end_point: Union[np.ndarray, List[float], Tuple[float, float], Any],
+    start_point: np.ndarray,
+    end_point: np.ndarray,
 ) -> float:
     """
     Calculate azimuth angle of line between two points (in degrees).

@@ -78,8 +78,11 @@ def cleanup_geometry(
     geopandas.GeoDataFrame
         GeoDataFrame with cleaned geometries.
     """
-    # Remove empty geometries before buffering
+    # Filter out None results from processing errors
+    result_geodataframe = result_geodataframe[result_geodataframe.geometry.notna()]
+
     result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
+
     if result_geodataframe.empty:
         return result_geodataframe  # Return early if GDF is empty
 
@@ -100,8 +103,6 @@ def cleanup_geometry(
 
     # Remove any geometries that became empty after buffering
     result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
-
-    # result_geodataframe = remove_zigzag_patterns(result_geodataframe)
 
     if result_geodataframe.empty:
         return result_geodataframe  # Return early if GDF is empty
@@ -179,10 +180,8 @@ def process_geometry_wrapper(
             circle_threshold=circle_threshold,
         )  # type: ignore
     )
-    # Filter out None results from processing errors
-    result_geodataframe = result_geodataframe[result_geodataframe.geometry.notna()]
 
-    # Clean up the resulting geometries (remove slivers, simplify)
+    # Clean up the resulting geometries (remove slivers)
     result_geodataframe = cleanup_geometry(
         result_geodataframe=result_geodataframe, simplify_tolerance=simplify_tolerance
     )

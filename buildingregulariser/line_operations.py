@@ -4,8 +4,8 @@ import numpy as np
 
 
 def create_line_equation(
-    point1: Union[np.ndarray, Tuple[float, float]],
-    point2: Union[np.ndarray, Tuple[float, float]],
+    point1: np.ndarray,
+    point2: np.ndarray,
 ) -> Tuple[float, float, float]:
     """
     Create a line equation in the form Ax + By + C = 0

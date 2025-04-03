@@ -119,23 +119,18 @@ def enforce_angles_post_process(
             # Use a slightly larger threshold for making changes to prevent jitter
             if abs(rotation_diff) > angle_tolerance:
                 changed = True  # Mark that an adjustment was made
-                # Rotate p2 around p1
-                # Pass tuples to rotation functions (assuming they expect tuples)
-                p1_rot = tuple(p1)
-                p2_rot = tuple(p2)
 
                 # Perform rotation (rotation_diff > 0 means counter-clockwise)
                 if rotation_diff > 0:
-                    new_p2_tuple = rotate_point(p2_rot, p1_rot, -rotation_diff)
+                    new_p2_tuple = rotate_point(p2, p1, -rotation_diff)
                 else:
-                    new_p2_tuple = rotate_point(p2_rot, p1_rot, abs(rotation_diff))
+                    new_p2_tuple = rotate_point(p2, p1, abs(rotation_diff))
 
                 # Update the endpoint in the list for the *next* segment's calculation
                 adjusted_points[p2_idx] = np.array(new_p2_tuple)
 
         # Check for convergence: If no points were adjusted significantly in this pass, stop.
         if not changed:
-            # print(f"Angle enforcement converged after {iteration + 1} iterations.")
             break
 
     # Return the list of N adjusted unique points
@@ -231,16 +226,9 @@ def regularize_coordinate_array(
     return closed_final_coords  # Return the closed array
 
 
-# In regularization.py
-
-
-def analyze_edges(coordinates: np.ndarray):  # Expects unclosed coordinates (N x 2)
+def analyze_edges(coordinates: np.ndarray):
     """
-    Analyze edges to find their lengths, angles, and identify the main direction
-    based on angle distribution, optimized for buildings where most lines are
-    perpendicular or parallel.
-
-    Handles wrap-around for the segment connecting the last point to the first.
+    Analyze edges using vectorized operations to find main direction and related data.
 
     Parameters:
     -----------
@@ -250,122 +238,105 @@ def analyze_edges(coordinates: np.ndarray):  # Expects unclosed coordinates (N x
     Returns:
     --------
     dict
-        Dictionary containing edge data including lengths, angles, indices, and main direction
+        Dictionary containing azimuth angles, edge indices, and main direction
     """
-    edge_lengths = []
-    azimuth_angles = []
-    edge_indices = []
-    num_points = len(coordinates)
-
-    if num_points < 3:
-        # Return empty or default data if not enough points for a polygon
+    if len(coordinates) < 3:
         return {
-            "edge_lengths": [],
-            "azimuth_angles": [],
-            "edge_indices": [],
-            "longest_edge_index": -1,
+            "azimuth_angles": np.array([]),
+            "edge_indices": np.array([]),
             "main_direction": 0,
-            "angle_distribution": [],
         }
 
-    for i in range(num_points):
-        current_idx = i
-        next_idx = (i + 1) % num_points  # Handles wrap-around: N-1 -> 0
+    # Create pairs of points forming edges
+    start_points = coordinates
+    end_points = np.roll(coordinates, -1, axis=0)
 
-        current_point = coordinates[current_idx]
-        next_point = coordinates[next_idx]
+    # Calculate vectors and lengths efficiently
+    vectors = end_points - start_points
+    edge_lengths = np.sqrt(np.sum(vectors**2, axis=1))
 
-        edge_length = calculate_distance(current_point, next_point)
-        # Check for coincident points before calculating azimuth
-        if edge_length < 1e-9:  # Use a small tolerance
-            # Optionally skip this edge or handle as needed
-            warnings.warn(
-                f"Skipping zero-length edge between index {current_idx} and {next_idx}"
-            )
-            continue  # Skip this degenerate edge
-
-        azimuth = calculate_azimuth_angle(current_point, next_point)
-
-        # Only include edges with meaningful length
-        # if edge_length > 0.001: # Keep your original threshold or adjust
-        edge_lengths.append(edge_length)
-        azimuth_angles.append(azimuth)
-        # Store the indices used for this edge
-        edge_indices.append([current_idx, next_idx])
-
-    # --- Rest of the angle analysis logic remains the same ---
-    # (Using the collected azimuth_angles and edge_lengths)
-
-    # Handle case where no valid edges were found
-    if not edge_lengths:
+    # Filter out degenerate edges
+    valid_edges = edge_lengths > 1e-9
+    if not np.any(valid_edges):
         return {
-            "edge_lengths": [],
-            "azimuth_angles": [],
-            "edge_indices": [],
-            "longest_edge_index": -1,
+            "azimuth_angles": np.array([]),
+            "edge_indices": np.array([]),
             "main_direction": 0,
-            "angle_distribution": [],
         }
 
-    # Normalize angles...
-    normalized_angles = [angle % 180 for angle in azimuth_angles]
-    orthogonal_angles = [angle % 90 for angle in normalized_angles]
+    # Keep only necessary data for valid edges
+    filtered_vectors = vectors[valid_edges]
+    filtered_lengths = edge_lengths[valid_edges]
 
-    # Create histogram bins...
+    # Calculate indices more efficiently
+    indices = np.stack(
+        [
+            np.arange(len(coordinates)),
+            (np.arange(len(coordinates)) + 1) % len(coordinates),
+        ],
+        axis=1,
+    )
+    filtered_indices = indices[valid_edges]
+
+    # Calculate azimuth angles
+    azimuth_angles = np.degrees(
+        np.arctan2(filtered_vectors[:, 1], filtered_vectors[:, 0])
+    )
+    azimuth_angles = (azimuth_angles + 360) % 360
+
+    # For main direction calculation, we only need normalized angles
+    normalized_angles = azimuth_angles % 180
+
+    # Simplified histogram calculation - directly calculate orthogonal angles
+    orthogonal_angles = normalized_angles % 90
     bin_size = 5
-    num_bins = int(90 // bin_size)
-    angle_bins = [0] * num_bins
+    num_bins = 18  # 90/5
 
-    # Count angles...
-    for angle, length in zip(orthogonal_angles, edge_lengths):
-        # Ensure bin_index is within bounds (can happen if angle is exactly 90)
-        bin_index = min(int(angle // bin_size), num_bins - 1)
-        angle_bins[bin_index] += length
+    # Create histogram using bincount for better performance
+    bin_indices = np.minimum(
+        np.floor(orthogonal_angles / bin_size).astype(int), num_bins - 1
+    )
+    angle_bins = np.bincount(bin_indices, weights=filtered_lengths, minlength=num_bins)
 
-    # Find dominant direction...
-    # Check if angle_bins is empty or all zeros
-    if not angle_bins or all(count == 0 for count in angle_bins):
-        main_direction = 0  # Default direction if no clear signal
-        warnings.warn("Could not determine main direction from angle distribution.")
+    if np.sum(angle_bins) == 0:
+        main_direction = 0
     else:
+        # Find the bin with maximum weight and calculate raw direction
         main_bin = np.argmax(angle_bins)
         raw_main_direction = (main_bin * bin_size) + (bin_size / 2)
 
-        # Determine final main direction (0-90 or 90-180 range)...
+        # Determine if raw_main_direction or its perpendicular has more support
         direction1 = raw_main_direction
         direction2 = (raw_main_direction + 90) % 180
-        support1 = 0
-        support2 = 0
-        for angle, length in zip(normalized_angles, edge_lengths):
-            dist1 = min(
-                abs(angle - direction1),
-                abs(angle - direction1 - 180),
-                abs(angle - direction1 + 180),
-            )
-            dist2 = min(
-                abs(angle - direction2),
-                abs(angle - direction2 - 180),
-                abs(angle - direction2 + 180),
-            )
-            if dist1 <= dist2:  # Give slight preference to dir1 in case of tie
-                support1 += length
-            else:
-                support2 += length
+
+        # Use broadcasting for distance calculations
+        dist1 = np.minimum.reduce(
+            [
+                np.abs(normalized_angles - direction1),
+                np.abs(normalized_angles - direction1 - 180),
+                np.abs(normalized_angles - direction1 + 180),
+            ]
+        )
+
+        dist2 = np.minimum.reduce(
+            [
+                np.abs(normalized_angles - direction2),
+                np.abs(normalized_angles - direction2 - 180),
+                np.abs(normalized_angles - direction2 + 180),
+            ]
+        )
+
+        # Calculate support more efficiently with boolean indexing
+        mask = dist1 <= dist2
+        support1 = np.sum(filtered_lengths[mask])
+        support2 = np.sum(filtered_lengths[~mask])
+
         main_direction = direction1 if support1 >= support2 else direction2
 
-    # Find longest edge index (relative to the filtered edge_lengths list)
-    longest_edge_idx_in_list = np.argmax(edge_lengths) if edge_lengths else -1
-    # The actual index pair can be retrieved using edge_indices[longest_edge_idx_in_list] if needed
-
     return {
-        "edge_lengths": edge_lengths,
         "azimuth_angles": azimuth_angles,
-        "edge_indices": edge_indices,  # These indices now correctly refer to the input 'coordinates' array
-        "longest_edge_index": longest_edge_idx_in_list,  # Index within the 'edge_lengths' list
+        "edge_indices": filtered_indices,
         "main_direction": main_direction,
-        "angle_distribution": list(
-            zip([i * bin_size + bin_size / 2 for i in range(num_bins)], angle_bins)
-        ),
     }
 
 
@@ -732,6 +703,15 @@ def regularize_single_polygon(
         Input polygon to regularize
     parallel_threshold : float
         Distance threshold for parallel line handling
+    allow_45_degree : bool
+        If True, allows 45-degree orientations relative to the main direction
+    allow_circles : bool
+        If True, attempts to detect polygons that are nearly circular and
+        replaces them with perfect circles
+    circle_threshold : float
+        Intersection over Union (IoU) threshold used for circle detection
+        Value between 0 and 1
+        Defaults to 0.9
 
     Returns:
     --------
@@ -744,13 +724,11 @@ def regularize_single_polygon(
     exterior_coordinates = np.array(polygon.exterior.coords)
     # append the first point to the end to close the polygon
 
-    # print(exterior_coordinates)
     regularized_exterior = regularize_coordinate_array(
         exterior_coordinates,
         parallel_threshold=parallel_threshold,
         allow_45_degree=allow_45_degree,
     )
-    # print(regularized_exterior)
     if allow_circles:
         radius = np.sqrt(polygon.area / np.pi)
         perfect_circle = polygon.centroid.buffer(radius, resolution=42)
