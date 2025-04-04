@@ -208,7 +208,6 @@ def regularize_coordinate_array(
         # Returning original for safety:
         return coordinates
 
-    # *** NEW: Post-processing step to enforce angles ***
     final_regularized_points_list = enforce_angles_post_process(
         initial_regularized_points,
         edge_data["main_direction"],
@@ -293,8 +292,8 @@ def analyze_edges(coordinates: np.ndarray):
 
     # Simplified histogram calculation - directly calculate orthogonal angles
     orthogonal_angles = normalized_angles % 90
-    bin_size = 5
-    num_bins = 18  # 90/5
+    bin_size = 1
+    num_bins = 90  # 90/5
 
     # Create histogram using bincount for better performance
     bin_indices = np.minimum(
