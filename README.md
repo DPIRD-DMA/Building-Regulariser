@@ -73,23 +73,13 @@ buildings = gpd.read_file("buildings.gpkg")
 regularized = regularize_geodataframe(buildings)
 ```
 
-### Working with Different Coordinate Systems
-
-```python
-regularized = regularize_geodataframe(
-    buildings,
-    target_crs="EPSG:3857"  # Web Mercator projection
-)
-```
-
 ### Fine-tuning Regularization Parameters
 
 ```python
 regularized = regularize_geodataframe(
     buildings,
     parallel_threshold=2.0,   # Higher values allow less edge alignment
-    simplify=True,
-    simplify_tolerance=0.5,   # Controls simplification level
+    simplify_tolerance=0.5,   # Controls simplification level, should be 2-3 x the raster pixel size
     allow_45_degree=True,     # Enable 45-degree angles
     allow_circles=True,       # Enable circle detection
     circle_threshold=0.9      # IOU threshold for circle detection
@@ -99,8 +89,6 @@ regularized = regularize_geodataframe(
 ### Parallel Processing for Large Datasets
 
 ```python
-import multiprocessing
-
 # Use multiple CPU cores for processing
 regularized = regularize_geodataframe(
     buildings,
