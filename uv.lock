@@ -27,8 +27,7 @@ wheels = [
 
 [[package]]
 name = "buildingregulariser"
-version = "0.1.3"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "geopandas" },
     { name = "numpy" },
