@@ -1,8 +1,8 @@
 import warnings
-from typing import List
+from typing import List, Optional, Tuple
 
 import numpy as np
-from shapely.geometry import LinearRing, MultiPolygon, Polygon
+from shapely.geometry import LinearRing, Polygon
 from shapely.geometry.base import BaseGeometry
 
 from .geometry_utils import calculate_azimuth_angle, calculate_distance
@@ -87,7 +87,7 @@ def enforce_angles_post_process(
     adjusted_points = [p.copy() for p in points]  # Work on a copy
     num_points = len(adjusted_points)
 
-    for iteration in range(max_iterations):
+    for _ in range(max_iterations):
         max_angle_diff_this_iter = 0.0
         changed = False  # Flag to track if any changes were made in this iteration
 
@@ -143,7 +143,7 @@ def regularize_coordinate_array(
     allow_45_degree: bool = True,
     diagonal_threshold_reduction: float = 15.0,
     angle_enforcement_tolerance: float = 0.1,
-) -> np.ndarray:
+) -> Tuple[np.ndarray, float]:
     """
     Regularize polygon coordinates by aligning edges to be either parallel
     or perpendicular (or 45 deg) to the main direction, with a
@@ -170,7 +170,7 @@ def regularize_coordinate_array(
         len(coordinates) < 4
     ):  # Need at least 3 unique points + closing point for a polygon
         warnings.warn("Not enough coordinates to regularize. Returning original.")
-        return coordinates
+        return coordinates, 0.0
 
     # Remove duplicate closing point for processing, if present
     if np.allclose(coordinates[0], coordinates[-1]):
@@ -182,7 +182,7 @@ def regularize_coordinate_array(
         warnings.warn(
             "Not enough unique coordinates to regularize. Returning original."
         )
-        return coordinates  # Return original closed coords
+        return coordinates, 0.0  # Return original closed coords
 
     # Analyze edges to find properties and main direction
     # Use the non-closed version for edge analysis
@@ -206,7 +206,7 @@ def regularize_coordinate_array(
         warnings.warn("Regularization resulted in too few points. Returning original.")
         # Decide what to return: maybe the simplified input or original?
         # Returning original for safety:
-        return coordinates
+        return coordinates, 0.0
 
     final_regularized_points_list = enforce_angles_post_process(
         initial_regularized_points,
@@ -219,14 +219,14 @@ def regularize_coordinate_array(
         warnings.warn(
             "Angle enforcement resulted in too few points. Returning original."
         )
-        return coordinates
+        return coordinates, 0.0
 
     # Convert list of arrays back to a single numpy array and ensure closure
     final_coords_array = np.array([p for p in final_regularized_points_list])
     # Ensure the final array is explicitly closed for Shapely
     closed_final_coords = np.vstack([final_coords_array, final_coords_array[0]])
 
-    return closed_final_coords  # Return the closed array
+    return closed_final_coords, edge_data["main_direction"]
 
 
 def analyze_edges(coordinates: np.ndarray):
@@ -292,12 +292,13 @@ def analyze_edges(coordinates: np.ndarray):
 
     # Simplified histogram calculation - directly calculate orthogonal angles
     orthogonal_angles = normalized_angles % 90
-    bin_size = 1
-    num_bins = 90  # 90/5
+    alignment_bin_size = 5
+
+    num_bins = int(90 / alignment_bin_size)
 
     # Create histogram using bincount for better performance
     bin_indices = np.minimum(
-        np.floor(orthogonal_angles / bin_size).astype(int), num_bins - 1
+        np.floor(orthogonal_angles / alignment_bin_size).astype(int), num_bins - 1
     )
     angle_bins = np.bincount(bin_indices, weights=filtered_lengths, minlength=num_bins)
 
@@ -306,7 +307,7 @@ def analyze_edges(coordinates: np.ndarray):
     else:
         # Find the bin with maximum weight and calculate raw direction
         main_bin = np.argmax(angle_bins)
-        raw_main_direction = (main_bin * bin_size) + (bin_size / 2)
+        raw_main_direction = (main_bin * alignment_bin_size) + (alignment_bin_size / 2)
 
         # Determine if raw_main_direction or its perpendicular has more support
         direction1 = raw_main_direction
@@ -335,7 +336,6 @@ def analyze_edges(coordinates: np.ndarray):
         support2 = np.sum(filtered_lengths[~mask])
 
         main_direction = direction1 if support1 >= support2 else direction2
-
     return {
         "azimuth_angles": azimuth_angles,
         "edge_indices": filtered_indices,
@@ -697,7 +697,8 @@ def regularize_single_polygon(
     diagonal_threshold_reduction: float = 15.0,
     allow_circles: bool = True,
     circle_threshold: float = 0.90,
-) -> Polygon:
+    include_metadata: bool = False,
+) -> Tuple[Polygon, Optional[float], Optional[float]]:
     """
     Regularize a Shapely polygon by aligning edges to principal directions
 
@@ -723,17 +724,19 @@ def regularize_single_polygon(
         Regularized polygon
     """
 
-    # Handle exterior ring
+    # Ensure the polygon is valid
+    polygon = polygon.buffer(0)
 
     exterior_coordinates = np.array(polygon.exterior.coords)
     # append the first point to the end to close the polygon
 
-    regularized_exterior = regularize_coordinate_array(
+    regularized_exterior, main_direction = regularize_coordinate_array(
         exterior_coordinates,
         parallel_threshold=parallel_threshold,
         allow_45_degree=allow_45_degree,
         diagonal_threshold_reduction=diagonal_threshold_reduction,
     )
+
     if allow_circles:
         radius = np.sqrt(polygon.area / np.pi)
         perfect_circle = polygon.centroid.buffer(radius, resolution=42)
@@ -752,7 +755,7 @@ def regularize_single_polygon(
     regularized_interiors: List[np.ndarray] = []
     for interior in polygon.interiors:
         interior_coordinates = np.array(interior.coords)
-        regularized_interior = regularize_coordinate_array(
+        regularized_interior, _ = regularize_coordinate_array(
             interior_coordinates,
             parallel_threshold=parallel_threshold,
             allow_45_degree=allow_45_degree,
@@ -766,12 +769,20 @@ def regularize_single_polygon(
         interior_rings = [LinearRing(r) for r in regularized_interiors]
 
         # Create regularized polygon
-        regularized_polygon = Polygon(exterior_ring, interior_rings)
-        return regularized_polygon
+        regularized_polygon = Polygon(exterior_ring, interior_rings).buffer(0)
+        if include_metadata:
+            final_iou = (
+                regularized_polygon.intersection(polygon).area
+                / regularized_polygon.union(polygon).area
+            )
+        else:
+            final_iou = None
+
+        return regularized_polygon, final_iou, main_direction
     except Exception as e:
         # If there's an error creating the polygon, return the original
         warnings.warn(f"Error creating regularized polygon: {e}. Returning original.")
-        return polygon
+        return polygon, None, None
 
 
 def process_geometry(
@@ -781,7 +792,8 @@ def process_geometry(
     diagonal_threshold_reduction: float,
     allow_circles: bool,
     circle_threshold: float,
-) -> BaseGeometry:
+    include_metadata: bool,
+) -> Tuple[BaseGeometry, Optional[float], Optional[float]]:
     """
     Process a single geometry, handling different geometry types
 
@@ -805,23 +817,12 @@ def process_geometry(
             diagonal_threshold_reduction=diagonal_threshold_reduction,
             allow_circles=allow_circles,
             circle_threshold=circle_threshold,
+            include_metadata=include_metadata,
         )
-    elif isinstance(geometry, MultiPolygon):
-        regularized_parts = [
-            regularize_single_polygon(
-                polygon=part,
-                parallel_threshold=parallel_threshold,
-                allow_45_degree=allow_45_degree,
-                diagonal_threshold_reduction=diagonal_threshold_reduction,
-                allow_circles=allow_circles,
-                circle_threshold=circle_threshold,
-            )
-            for part in geometry.geoms
-        ]
-        return MultiPolygon(regularized_parts)
+
     else:
         # Return unmodified if not a polygon
         warnings.warn(
             f"Unsupported geometry type: {type(geometry)}. Returning original."
         )
-        return geometry
+        return geometry, None, None
