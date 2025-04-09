@@ -128,7 +128,9 @@ def process_geometry_wrapper(
     diagonal_threshold_reduction: float,
     allow_circles: bool,
     circle_threshold: float,
+    include_metadata: bool,
 ):
+
     # Check if input has CRS defined, warn if not
     if result_geodataframe.crs is None:
         warnings.warn(
@@ -172,7 +174,7 @@ def process_geometry_wrapper(
         )
     )
 
-    result_geodataframe["geometry"] = result_geodataframe.geometry.apply(
+    processed_data = result_geodataframe.geometry.apply(
         lambda geometry: process_geometry(
             geometry=geometry,
             parallel_threshold=parallel_threshold,
@@ -180,8 +182,14 @@ def process_geometry_wrapper(
             diagonal_threshold_reduction=diagonal_threshold_reduction,
             allow_circles=allow_circles,
             circle_threshold=circle_threshold,
-        )  # type: ignore
+            include_metadata=include_metadata,
+        )
     )
+    result_geodataframe["geometry"] = processed_data.apply(lambda x: x[0])
+    if include_metadata:
+        # Split the results into geometry and metadata columns
+        result_geodataframe["iou"] = processed_data.apply(lambda x: x[1])
+        result_geodataframe["main_direction"] = processed_data.apply(lambda x: x[2])
 
     # Clean up the resulting geometries (remove slivers)
     result_geodataframe = cleanup_geometry(
