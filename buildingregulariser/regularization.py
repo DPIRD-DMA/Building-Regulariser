@@ -229,19 +229,24 @@ def regularize_coordinate_array(
     return closed_final_coords, edge_data["main_direction"]
 
 
-def analyze_edges(coordinates: np.ndarray):
+def analyze_edges(
+    coordinates: np.ndarray, coarse_bin_size: int = 5, fine_bin_size: int = 1
+):
     """
-    Analyze edges using vectorized operations to find main direction and related data.
+    Analyze edges to determine azimuth angles and main structural direction.
 
     Parameters:
     -----------
-    coordinates : numpy.ndarray
+    coordinates : np.ndarray
         Polygon coordinates (shape: N x 2), assumed NOT closed.
 
     Returns:
     --------
     dict
-        Dictionary containing azimuth angles, edge indices, and main direction
+        Dictionary containing:
+        - azimuth_angles: array of absolute edge angles (degrees)
+        - edge_indices: array of [start_idx, end_idx] pairs for each edge
+        - main_direction: float angle (degrees) representing dominant structure orientation
     """
     if len(coordinates) < 3:
         return {
@@ -250,28 +255,46 @@ def analyze_edges(coordinates: np.ndarray):
             "main_direction": 0,
         }
 
-    # Create pairs of points forming edges
+    def create_weighted_histogram(
+        angles: np.ndarray, bin_size: float, weights: np.ndarray, num_bins_override=None
+    ):
+        num_bins = (
+            int(90 / bin_size) if num_bins_override is None else num_bins_override
+        )
+        indices = np.minimum(np.floor(angles / bin_size).astype(int), num_bins - 1)
+        return np.bincount(indices, weights=weights, minlength=num_bins)
+
+    def dist_to_dir(d: float) -> np.ndarray:
+        return np.minimum.reduce(
+            [
+                np.abs(normalized_angles - d),
+                np.abs(normalized_angles - d - 180),
+                np.abs(normalized_angles - d + 180),
+            ]
+        )
+
+    # Form edges and compute vectors
     start_points = coordinates
     end_points = np.roll(coordinates, -1, axis=0)
-
-    # Calculate vectors and lengths efficiently
     vectors = end_points - start_points
-    edge_lengths = np.sqrt(np.sum(vectors**2, axis=1))
+    edge_lengths = np.linalg.norm(vectors, axis=1)
 
-    # Filter out degenerate edges
-    valid_edges = edge_lengths > 1e-9
-    if not np.any(valid_edges):
+    # Filter out very short edges
+    valid = edge_lengths > 1e-9
+    if not np.any(valid):
         return {
             "azimuth_angles": np.array([]),
             "edge_indices": np.array([]),
             "main_direction": 0,
         }
 
-    # Keep only necessary data for valid edges
-    filtered_vectors = vectors[valid_edges]
-    filtered_lengths = edge_lengths[valid_edges]
+    vectors = vectors[valid]
+    lengths = edge_lengths[valid]
+    azimuth_angles = (np.degrees(np.arctan2(vectors[:, 1], vectors[:, 0])) + 360) % 360
+    normalized_angles = azimuth_angles % 180
+    orthogonal_angles = normalized_angles % 90
 
-    # Calculate indices
+    # Store edge indices
     indices = np.stack(
         [
             np.arange(len(coordinates)),
@@ -279,66 +302,37 @@ def analyze_edges(coordinates: np.ndarray):
         ],
         axis=1,
     )
-    filtered_indices = indices[valid_edges]
+    edge_indices = indices[valid]
 
-    # Calculate azimuth angles
-    azimuth_angles = np.degrees(
-        np.arctan2(filtered_vectors[:, 1], filtered_vectors[:, 0])
+    coarse_bins = create_weighted_histogram(orthogonal_angles, coarse_bin_size, lengths)
+    fine_bins = create_weighted_histogram(
+        orthogonal_angles, fine_bin_size, lengths, num_bins_override=90
     )
-    azimuth_angles = (azimuth_angles + 360) % 360
 
-    # For main direction calculation, we only need normalized angles
-    normalized_angles = azimuth_angles % 180
-
-    # Simplified histogram calculation - directly calculate orthogonal angles
-    orthogonal_angles = normalized_angles % 90
-    alignment_bin_size = 5
-
-    num_bins = int(90 / alignment_bin_size)
-
-    # Create histogram using bincount for better performance
-    bin_indices = np.minimum(
-        np.floor(orthogonal_angles / alignment_bin_size).astype(int), num_bins - 1
-    )
-    angle_bins = np.bincount(bin_indices, weights=filtered_lengths, minlength=num_bins)
-
-    if np.sum(angle_bins) == 0:
+    if np.sum(coarse_bins) == 0:
         main_direction = 0
     else:
-        # Find the bin with maximum weight and calculate raw direction
-        main_bin = np.argmax(angle_bins)
-        raw_main_direction = (main_bin * alignment_bin_size) + (alignment_bin_size / 2)
+        # Step 1: Coarse dominant bin
+        main_bin = np.argmax(coarse_bins)
+        fine_start = main_bin * coarse_bin_size
+        fine_end = fine_start + coarse_bin_size
 
-        # Determine if raw_main_direction or its perpendicular has more support
-        direction1 = raw_main_direction
-        direction2 = (raw_main_direction + 90) % 180
+        # Step 2: Refine with fine bin
+        refined_bin = np.argmax(fine_bins[fine_start:fine_end])
+        refined_angle = fine_start + refined_bin + fine_bin_size / 2
 
-        # Use broadcasting for distance calculations
-        dist1 = np.minimum.reduce(
-            [
-                np.abs(normalized_angles - direction1),
-                np.abs(normalized_angles - direction1 - 180),
-                np.abs(normalized_angles - direction1 + 180),
-            ]
-        )
+        # Step 3: Choose between refined or perpendicular angle
+        dir1 = refined_angle
+        dir2 = (refined_angle + 90) % 180
 
-        dist2 = np.minimum.reduce(
-            [
-                np.abs(normalized_angles - direction2),
-                np.abs(normalized_angles - direction2 - 180),
-                np.abs(normalized_angles - direction2 + 180),
-            ]
-        )
+        support1 = np.sum(lengths[dist_to_dir(dir1) <= dist_to_dir(dir2)])
+        support2 = np.sum(lengths[dist_to_dir(dir1) > dist_to_dir(dir2)])
 
-        # Calculate support more efficiently with boolean indexing
-        mask = dist1 <= dist2
-        support1 = np.sum(filtered_lengths[mask])
-        support2 = np.sum(filtered_lengths[~mask])
+        main_direction = dir1 if support1 >= support2 else dir2
 
-        main_direction = direction1 if support1 >= support2 else direction2
     return {
         "azimuth_angles": azimuth_angles,
-        "edge_indices": filtered_indices,
+        "edge_indices": edge_indices,
         "main_direction": main_direction,
     }
 
