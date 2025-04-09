@@ -24,6 +24,7 @@ def regularize_geodataframe(
     allow_circles: bool = True,
     circle_threshold: float = 0.9,
     num_cores: int = 1,
+    include_metadata: bool = False,
 ) -> gpd.GeoDataFrame:
     """
     Regularizes polygon geometries in a GeoDataFrame by aligning edges.
@@ -52,6 +53,10 @@ def regularize_geodataframe(
     allow_45_degree : bool, optional
         If True, allows edges to be oriented at 45-degree angles relative
         to the main direction during regularization. Defaults to True.
+    diagonal_threshold_reduction : float, optional
+        Reduction factor in degrees to reduce the likelihood of diagonal
+        edges being created. larger values reduce the likelihood of diagonal edges.
+        Defaults to 15.
     allow_circles : bool, optional
         If True, attempts to detect polygons that are nearly circular and
         replaces them with perfect circles. Defaults to True.
@@ -61,6 +66,9 @@ def regularize_geodataframe(
     num_cores : int, optional
         Number of CPU cores to use for parallel processing. If 1, processing
         is done sequentially. Defaults to 1.
+    include_metadata : bool, optional
+        If True, includes metadata about the regularization process in the
+        output GeoDataFrame. Defaults to False.
 
     Returns:
     --------
@@ -71,6 +79,8 @@ def regularize_geodataframe(
     """
     # Make a copy to avoid modifying the original GeoDataFrame
     result_geodataframe = geodataframe.copy()
+    # explode the geometries to process them individually
+    result_geodataframe = result_geodataframe.explode(ignore_index=True)
     # split gdf into chunks for parallel processing
 
     if num_cores == 1:
@@ -84,6 +94,7 @@ def regularize_geodataframe(
             diagonal_threshold_reduction=diagonal_threshold_reduction,
             allow_circles=allow_circles,
             circle_threshold=circle_threshold,
+            include_metadata=include_metadata,
         )
     else:
         chunk_size = get_chunk_size(
@@ -102,6 +113,7 @@ def regularize_geodataframe(
                 diagonal_threshold_reduction=diagonal_threshold_reduction,
                 allow_circles=allow_circles,
                 circle_threshold=circle_threshold,
+                include_metadata=include_metadata,
             )
             # Process each chunk in parallel
             processed_chunks = pool.map(process_geometry_partial, gdf_chunks)
