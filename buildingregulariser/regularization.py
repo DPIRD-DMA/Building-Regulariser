@@ -1,3 +1,4 @@
+import math
 import warnings
 from typing import List, Optional, Tuple
 
@@ -256,13 +257,58 @@ def analyze_edges(
         }
 
     def create_weighted_histogram(
-        angles: np.ndarray, bin_size: float, weights: np.ndarray, num_bins_override=None
-    ):
+        angles: np.ndarray,
+        bin_size: float,
+        weights: np.ndarray,
+        num_bins_override=None,
+        smooth: bool = True,
+    ) -> np.ndarray:
         num_bins = (
             int(90 / bin_size) if num_bins_override is None else num_bins_override
         )
         indices = np.minimum(np.floor(angles / bin_size).astype(int), num_bins - 1)
-        return np.bincount(indices, weights=weights, minlength=num_bins)
+        bins = np.bincount(indices, weights=weights, minlength=num_bins)
+        if smooth:
+            bins = smooth_histogram(bins)
+        return bins
+
+    def smooth_histogram(hist: np.ndarray) -> np.ndarray:
+        smoothed = hist.copy()
+
+        # Smooth internal bins
+        for i in range(1, len(hist) - 1):
+            smoothed[i] = (2 * hist[i] + hist[i - 1] + hist[i + 1]) / 4
+
+        # Smooth edges differently
+        smoothed[0] = (2 * hist[0] + hist[1]) / 3
+        smoothed[-1] = (2 * hist[-1] + hist[-2]) / 3
+
+        return smoothed
+
+    def find_best_symmetric_bin(hist: np.ndarray) -> int:
+        """
+        Find the dominant bin in a histogram, considering symmetry.
+
+        This averages the histogram with its mirror (reverse),
+        then selects the top two candidates and picks the one with
+        the largest value in the original histogram.
+
+        Parameters:
+        -----------
+        hist : np.ndarray
+            Histogram of bin weights.
+
+        Returns:
+        --------
+        int
+            Index of the selected dominant bin.
+        """
+        mirrored_mean = (hist + hist[::-1]) / 2
+        sorted_indices = np.argsort(mirrored_mean)
+        top_two = sorted_indices[-2:]
+
+        a, b = top_two
+        return a if hist[a] > hist[b] else b
 
     def dist_to_dir(d: float) -> np.ndarray:
         return np.minimum.reduce(
@@ -294,7 +340,6 @@ def analyze_edges(
     normalized_angles = azimuth_angles % 180
     orthogonal_angles = normalized_angles % 90
 
-    # Store edge indices
     indices = np.stack(
         [
             np.arange(len(coordinates)),
@@ -313,13 +358,28 @@ def analyze_edges(
         main_direction = 0
     else:
         # Step 1: Coarse dominant bin
-        main_bin = np.argmax(coarse_bins)
+        main_bin = find_best_symmetric_bin(coarse_bins)
         fine_start = main_bin * coarse_bin_size
         fine_end = fine_start + coarse_bin_size
 
         # Step 2: Refine with fine bin
-        refined_bin = np.argmax(fine_bins[fine_start:fine_end])
-        refined_angle = fine_start + refined_bin + fine_bin_size / 2
+        refined_bin = find_best_symmetric_bin(fine_bins[fine_start:fine_end])
+
+        # This will be the center of the refined bin
+        refined_angle_center = fine_start + refined_bin + fine_bin_size / 2
+
+        # Round the angle up or down based on the bin's neighbors
+        if refined_bin == 0:
+            refined_angle = math.floor(refined_angle_center)
+        elif refined_bin == (fine_end - fine_start - 1):
+            refined_angle = math.ceil(refined_angle_center)
+        else:
+            left = fine_bins[fine_start + refined_bin - 1]
+            right = fine_bins[fine_start + refined_bin + 1]
+            if right > left:
+                refined_angle = math.ceil(refined_angle_center)
+            else:
+                refined_angle = math.floor(refined_angle_center)
 
         # Step 3: Choose between refined or perpendicular angle
         dir1 = refined_angle
