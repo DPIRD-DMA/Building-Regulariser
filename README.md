@@ -31,7 +31,10 @@ Inspired by [RS-building-regularization](https://github.com/niecongchong/RS-buil
 ```bash
 pip install buildingregulariser
 ```
-
+or 
+```bash
+conda install conda-forge::buildingregulariser
+```
 ## Quick Start
 
 ```python
