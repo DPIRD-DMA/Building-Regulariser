@@ -107,6 +107,7 @@ regularized = regularize_geodataframe(
 - **allow_circles**: If True, detects and converts near-circular shapes to perfect circles (default: True)
 - **circle_threshold**: Intersection over Union (IoU) threshold for circle detection (default: 0.9)
 - **num_cores**: Number of CPU cores to use for parallel processing (default: 1)
+- **include_metadata**: Include the main direction and IOU in output gdf
 
 ## Returns
 
