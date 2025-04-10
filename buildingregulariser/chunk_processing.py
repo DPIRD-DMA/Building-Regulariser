@@ -79,9 +79,8 @@ def cleanup_geometry(
         GeoDataFrame with cleaned geometries.
     """
     # Filter out None results from processing errors
-    result_geodataframe = result_geodataframe[result_geodataframe.geometry.notna()]
-
     result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
+    result_geodataframe = result_geodataframe[result_geodataframe.geometry.notna()]
 
     if result_geodataframe.empty:
         return result_geodataframe  # Return early if GDF is empty
