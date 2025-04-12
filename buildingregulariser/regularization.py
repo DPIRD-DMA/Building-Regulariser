@@ -144,7 +144,8 @@ def regularize_coordinate_array(
     allow_45_degree: bool = True,
     diagonal_threshold_reduction: float = 15.0,
     angle_enforcement_tolerance: float = 0.1,
-) -> Tuple[np.ndarray, float]:
+    cardinal_snapping_threshold: float = 0.0,
+) -> Tuple[np.ndarray, float, bool]:
     """
     Regularize polygon coordinates by aligning edges to be either parallel
     or perpendicular (or 45 deg) to the main direction, with a
@@ -171,7 +172,7 @@ def regularize_coordinate_array(
         len(coordinates) < 4
     ):  # Need at least 3 unique points + closing point for a polygon
         warnings.warn("Not enough coordinates to regularize. Returning original.")
-        return coordinates, 0.0
+        return coordinates, 0.0, False
 
     # Remove duplicate closing point for processing, if present
     if np.allclose(coordinates[0], coordinates[-1]):
@@ -183,11 +184,14 @@ def regularize_coordinate_array(
         warnings.warn(
             "Not enough unique coordinates to regularize. Returning original."
         )
-        return coordinates, 0.0  # Return original closed coords
+        return coordinates, 0.0, False  # Return original closed coords
 
     # Analyze edges to find properties and main direction
     # Use the non-closed version for edge analysis
-    edge_data = analyze_edges(processing_coords)
+    edge_data = analyze_edges(
+        coordinates=processing_coords,
+        cardinal_snapping_threshold=cardinal_snapping_threshold,
+    )
 
     # Orient edges based on main direction
     oriented_edges, edge_orientations = orient_edges(
@@ -207,7 +211,7 @@ def regularize_coordinate_array(
         warnings.warn("Regularization resulted in too few points. Returning original.")
         # Decide what to return: maybe the simplified input or original?
         # Returning original for safety:
-        return coordinates, 0.0
+        return coordinates, 0.0, False
 
     final_regularized_points_list = enforce_angles_post_process(
         initial_regularized_points,
@@ -220,19 +224,25 @@ def regularize_coordinate_array(
         warnings.warn(
             "Angle enforcement resulted in too few points. Returning original."
         )
-        return coordinates, 0.0
+        return coordinates, 0.0, False
 
     # Convert list of arrays back to a single numpy array and ensure closure
     final_coords_array = np.array([p for p in final_regularized_points_list])
     # Ensure the final array is explicitly closed for Shapely
     closed_final_coords = np.vstack([final_coords_array, final_coords_array[0]])
-
-    return closed_final_coords, edge_data["main_direction"]
+    return (
+        closed_final_coords,
+        edge_data["main_direction"],
+        edge_data["direction_snapped"],
+    )
 
 
 def analyze_edges(
-    coordinates: np.ndarray, coarse_bin_size: int = 5, fine_bin_size: int = 1
-):
+    coordinates: np.ndarray,
+    cardinal_snapping_threshold: float = 0.0,
+    coarse_bin_size: int = 5,
+    fine_bin_size: int = 1,
+) -> dict:
     """
     Analyze edges to determine azimuth angles and main structural direction.
 
@@ -255,6 +265,23 @@ def analyze_edges(
             "edge_indices": np.array([]),
             "main_direction": 0,
         }
+
+    def cardinal_snapping(
+        main_direction: float, cardinal_snapping_threshold: float
+    ) -> Tuple[float, int]:
+        # Checks North
+        if main_direction < cardinal_snapping_threshold:
+            # Snap to 0 degrees
+            return 0.0, 1
+        # Checks South
+        elif main_direction > (180 - cardinal_snapping_threshold):
+            return 180.0, 1
+        # Checks East/West
+        elif main_direction > (90 - cardinal_snapping_threshold) and main_direction < (
+            90 + cardinal_snapping_threshold
+        ):
+            return 90.0, 1
+        return main_direction, 0
 
     def create_weighted_histogram(
         angles: np.ndarray,
@@ -332,6 +359,7 @@ def analyze_edges(
             "azimuth_angles": np.array([]),
             "edge_indices": np.array([]),
             "main_direction": 0,
+            "direction_snapped": 0,
         }
 
     vectors = vectors[valid]
@@ -390,10 +418,18 @@ def analyze_edges(
 
         main_direction = dir1 if support1 >= support2 else dir2
 
+    if cardinal_snapping_threshold > 0:
+        main_direction, direction_snapped = cardinal_snapping(
+            main_direction, cardinal_snapping_threshold
+        )
+    else:
+        direction_snapped = 0
+
     return {
         "azimuth_angles": azimuth_angles,
         "edge_indices": edge_indices,
         "main_direction": main_direction,
+        "direction_snapped": direction_snapped,
     }
 
 
@@ -746,13 +782,14 @@ def handle_parallel_edges(
 
 def regularize_single_polygon(
     polygon: Polygon,
-    parallel_threshold: float = 3,
-    allow_45_degree: bool = True,
-    diagonal_threshold_reduction: float = 15.0,
-    allow_circles: bool = True,
-    circle_threshold: float = 0.90,
-    include_metadata: bool = False,
-) -> Tuple[Polygon, Optional[float], Optional[float]]:
+    parallel_threshold: float,
+    allow_45_degree: bool,
+    diagonal_threshold_reduction: float,
+    allow_circles: bool,
+    circle_threshold: float,
+    include_metadata: bool,
+    cardinal_snapping_threshold: float,
+) -> Tuple[Polygon, Optional[float], Optional[float], Optional[float]]:
     """
     Regularize a Shapely polygon by aligning edges to principal directions
 
@@ -784,11 +821,14 @@ def regularize_single_polygon(
     exterior_coordinates = np.array(polygon.exterior.coords)
     # append the first point to the end to close the polygon
 
-    regularized_exterior, main_direction = regularize_coordinate_array(
-        exterior_coordinates,
-        parallel_threshold=parallel_threshold,
-        allow_45_degree=allow_45_degree,
-        diagonal_threshold_reduction=diagonal_threshold_reduction,
+    regularized_exterior, main_direction, direction_snapped = (
+        regularize_coordinate_array(
+            exterior_coordinates,
+            parallel_threshold=parallel_threshold,
+            allow_45_degree=allow_45_degree,
+            diagonal_threshold_reduction=diagonal_threshold_reduction,
+            cardinal_snapping_threshold=cardinal_snapping_threshold,
+        )
     )
 
     if allow_circles:
@@ -809,10 +849,12 @@ def regularize_single_polygon(
     regularized_interiors: List[np.ndarray] = []
     for interior in polygon.interiors:
         interior_coordinates = np.array(interior.coords)
-        regularized_interior, _ = regularize_coordinate_array(
+        regularized_interior, _, _ = regularize_coordinate_array(
             interior_coordinates,
             parallel_threshold=parallel_threshold,
             allow_45_degree=allow_45_degree,
+            diagonal_threshold_reduction=diagonal_threshold_reduction,
+            cardinal_snapping_threshold=cardinal_snapping_threshold,
         )
         regularized_interiors.append(regularized_interior)
 
@@ -830,13 +872,13 @@ def regularize_single_polygon(
                 / regularized_polygon.union(polygon).area
             )
         else:
-            final_iou = None
+            final_iou = 0
 
-        return regularized_polygon, final_iou, main_direction
+        return regularized_polygon, final_iou, main_direction, direction_snapped
     except Exception as e:
         # If there's an error creating the polygon, return the original
         warnings.warn(f"Error creating regularized polygon: {e}. Returning original.")
-        return polygon, None, None
+        return polygon, 0, 0, 0
 
 
 def process_geometry(
@@ -847,7 +889,8 @@ def process_geometry(
     allow_circles: bool,
     circle_threshold: float,
     include_metadata: bool,
-) -> Tuple[BaseGeometry, Optional[float], Optional[float]]:
+    cardinal_snapping_threshold: float,
+) -> Tuple[BaseGeometry, Optional[float], Optional[float], Optional[float]]:
     """
     Process a single geometry, handling different geometry types
 
@@ -872,6 +915,7 @@ def process_geometry(
             allow_circles=allow_circles,
             circle_threshold=circle_threshold,
             include_metadata=include_metadata,
+            cardinal_snapping_threshold=cardinal_snapping_threshold,
         )
 
     else:
@@ -879,4 +923,4 @@ def process_geometry(
         warnings.warn(
             f"Unsupported geometry type: {type(geometry)}. Returning original."
         )
-        return geometry, None, None
+        return geometry, 0, 0, 0

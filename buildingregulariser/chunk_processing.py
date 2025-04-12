@@ -6,6 +6,7 @@ import pyproj
 from pyproj import CRS
 
 from .regularization import process_geometry
+from .rotation import minimize_iou_by_rotation
 
 
 def get_chunk_size(item_count: int, num_cores: int, max_size: int = 1000) -> int:
@@ -128,8 +129,9 @@ def process_geometry_wrapper(
     allow_circles: bool,
     circle_threshold: float,
     include_metadata: bool,
+    cardinal_snapping_threshold: float,
+    refine_alignment_max: int,
 ):
-
     # Check if input has CRS defined, warn if not
     if result_geodataframe.crs is None:
         warnings.warn(
@@ -154,6 +156,7 @@ def process_geometry_wrapper(
                 "Angle and distance calculations may be inaccurate. Consider setting "
                 "`target_crs` to a suitable projected CRS."
             )
+    complex_gdf = result_geodataframe.copy()
 
     # Apply initial simplification if requested
     if simplify:
@@ -182,18 +185,23 @@ def process_geometry_wrapper(
             allow_circles=allow_circles,
             circle_threshold=circle_threshold,
             include_metadata=include_metadata,
+            cardinal_snapping_threshold=cardinal_snapping_threshold,
         )
     )
     result_geodataframe["geometry"] = processed_data.apply(lambda x: x[0])
-    if include_metadata:
-        # Split the results into geometry and metadata columns
-        result_geodataframe["iou"] = processed_data.apply(lambda x: x[1])
-        result_geodataframe["main_direction"] = processed_data.apply(lambda x: x[2])
+    result_geodataframe["iou"] = processed_data.apply(lambda x: x[1])
+    result_geodataframe["main_direction"] = processed_data.apply(lambda x: x[2])
+    result_geodataframe["rotation_snapped"] = processed_data.apply(lambda x: x[3])
 
     # Clean up the resulting geometries (remove slivers)
     result_geodataframe = cleanup_geometry(
         result_geodataframe=result_geodataframe, simplify_tolerance=simplify_tolerance
     )
+
+    if refine_alignment_max != 0:
+        result_geodataframe = minimize_iou_by_rotation(
+            complex_gdf, result_geodataframe, max_rotation_degrees=refine_alignment_max
+        )
 
     # Reproject back to the original CRS if it was changed
     if target_crs is not None and original_crs is not None:
@@ -202,4 +210,9 @@ def process_geometry_wrapper(
             CRS.from_user_input(original_crs)
         ):
             result_geodataframe = result_geodataframe.to_crs(original_crs)
+    if not include_metadata:
+        # Drop metadata columns if not needed
+        result_geodataframe = result_geodataframe.drop(
+            columns=["iou", "main_direction", "rotation_snapped"]
+        )
     return result_geodataframe

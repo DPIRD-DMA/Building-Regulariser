@@ -6,11 +6,7 @@ import geopandas as gpd
 import pandas as pd
 import pyproj
 
-from .chunk_processing import (
-    get_chunk_size,
-    process_geometry_wrapper,
-    split_gdf,
-)
+from .chunk_processing import get_chunk_size, process_geometry_wrapper, split_gdf
 
 
 def regularize_geodataframe(
@@ -25,6 +21,8 @@ def regularize_geodataframe(
     circle_threshold: float = 0.9,
     num_cores: int = 1,
     include_metadata: bool = False,
+    cardinal_snapping_threshold: float = 2.0,
+    refine_alignment_max: Union[int, float] = 2,
 ) -> gpd.GeoDataFrame:
     """
     Regularizes polygon geometries in a GeoDataFrame by aligning edges.
@@ -82,7 +80,6 @@ def regularize_geodataframe(
     # explode the geometries to process them individually
     result_geodataframe = result_geodataframe.explode(ignore_index=True)
     # split gdf into chunks for parallel processing
-
     if num_cores == 1:
         result_geodataframe = process_geometry_wrapper(
             result_geodataframe=result_geodataframe,
@@ -95,6 +92,8 @@ def regularize_geodataframe(
             allow_circles=allow_circles,
             circle_threshold=circle_threshold,
             include_metadata=include_metadata,
+            cardinal_snapping_threshold=cardinal_snapping_threshold,
+            refine_alignment_max=round(refine_alignment_max),
         )
     else:
         chunk_size = get_chunk_size(
@@ -114,6 +113,8 @@ def regularize_geodataframe(
                 allow_circles=allow_circles,
                 circle_threshold=circle_threshold,
                 include_metadata=include_metadata,
+                cardinal_snapping_threshold=cardinal_snapping_threshold,
+                refine_alignment_max=round(refine_alignment_max),
             )
             # Process each chunk in parallel
             processed_chunks = pool.map(process_geometry_partial, gdf_chunks)
@@ -121,4 +122,5 @@ def regularize_geodataframe(
         result_geodataframe = gpd.GeoDataFrame(
             pd.concat(processed_chunks, ignore_index=True), crs=result_geodataframe.crs
         )
+
     return result_geodataframe
