@@ -6,7 +6,7 @@ import pyproj
 from pyproj import CRS
 
 from .regularization import process_geometry
-from .rotation import minimize_iou_by_rotation
+from .rotation import maximize_iou_by_rotation
 
 
 def get_chunk_size(item_count: int, num_cores: int, max_size: int = 1000) -> int:
@@ -199,7 +199,7 @@ def process_geometry_wrapper(
     )
 
     if refine_alignment_max != 0:
-        result_geodataframe = minimize_iou_by_rotation(
+        result_geodataframe = maximize_iou_by_rotation(
             complex_gdf, result_geodataframe, max_rotation_degrees=refine_alignment_max
         )
 

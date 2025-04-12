@@ -52,7 +52,7 @@ def rotate_point(
     return (final_x, final_y)
 
 
-def minimize_iou_by_rotation(
+def maximize_iou_by_rotation(
     gdf1: gpd.GeoDataFrame,
     gdf2: gpd.GeoDataFrame,
     max_rotation_degrees: int = 10,
