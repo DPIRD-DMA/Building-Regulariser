@@ -2,7 +2,9 @@
     "cSpell.words": [
         "arctan",
         "geodataframe",
+        "ndarray",
         "reprojection",
-        "segmentize"
+        "segmentize",
+        "sindex"
     ]
 }
