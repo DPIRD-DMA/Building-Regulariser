@@ -1,57 +1,65 @@
-import warnings
-from typing import Optional, Union
-
 import geopandas as gpd
-import pyproj
-from pyproj import CRS
 
 from .regularization import process_geometry
 
 
 def get_chunk_size(item_count: int, num_cores: int, max_size: int = 1000) -> int:
     """
-    Calculate the chunk size for splitting a GeoDataFrame based on the number of items and cores.
+    Calculate an optimal chunk size for parallel processing.
+
+    Determines a balanced chunk size based on the number of items to process
+    and available CPU cores, while respecting a maximum chunk size limit.
 
     Parameters:
     -----------
     item_count : int
-        The total number of items in the GeoDataFrame.
+        Total number of items to be processed.
     num_cores : int
-        The number of CPU cores available for processing.
+        Number of CPU cores available for parallel processing.
     max_size : int, optional
-        The maximum size of each chunk. Defaults to 1000.
+        Maximum allowed chunk size regardless of other factors. Default is 1000.
 
     Returns:
     --------
     int
-        The calculated chunk size.
+        Calculated chunk size, at least 1, at most max_size, and balanced
+        across available cores.
     """
-    # divide item_count by num_cores
-    chunks_size = item_count // num_cores
-    # make sure chunks_size is at least 1
-    if chunks_size < 1:
-        chunks_size = 1
-    # make sure chunks_size is at most max_size
-    if chunks_size > max_size:
-        chunks_size = max_size
-    return chunks_size
+    # Calculate initial chunk size
+    chunk_size = (item_count + num_cores - 1) // num_cores
+
+    # Ensure it's not too large
+    if chunk_size > max_size:
+        chunk_size = max_size
+
+    # Ensure it's at least 1
+    return max(1, chunk_size)
 
 
 def split_gdf(gdf: gpd.GeoDataFrame, chunk_size: int) -> list[gpd.GeoDataFrame]:
     """
-    Splits a GeoDataFrame into chunks of a specified size.
+    Splits a GeoDataFrame into smaller chunks for parallel processing.
+
+    Divides a GeoDataFrame into a list of smaller GeoDataFrames, each
+    containing at most chunk_size rows. This facilitates parallel processing
+    of large datasets by distributing work across multiple processes.
 
     Parameters:
     -----------
-    gdf : geopandas.GeoDataFrame
-        The GeoDataFrame to split.
+    gdf : gpd.GeoDataFrame
+        The GeoDataFrame to split into chunks.
     chunk_size : int
-        The number of rows per chunk.
+        Maximum number of rows in each chunk.
 
     Returns:
     --------
-    list of geopandas.GeoDataFrame
-        A list of GeoDataFrames, each containing up to `chunk_size` rows.
+    list[gpd.GeoDataFrame]
+        A list of GeoDataFrame chunks, each containing at most chunk_size rows.
+        The original index values are preserved in each chunk.
+
+    Notes:
+    ------
+    Empty GeoDataFrames will result in an empty list.
     """
     return [gdf[i : i + chunk_size] for i in range(0, len(gdf), chunk_size)]
 
@@ -119,7 +127,6 @@ def cleanup_geometry(
 
 def process_geometry_wrapper(
     result_geodataframe: gpd.GeoDataFrame,
-    target_crs: Optional[Union[str, pyproj.CRS]],
     simplify: bool,
     simplify_tolerance: float,
     parallel_threshold: float,
@@ -129,32 +136,46 @@ def process_geometry_wrapper(
     circle_threshold: float,
     include_metadata: bool,
 ):
+    """
+    This wrapper function coordinates the full process of polygon regularization by:
+    1. Applying initial simplification to reduce vertex count (if requested)
+    2. Segmenting complex geometries to maintain fidelity during processing
+    3. Applying the regularization algorithm to each geometry
+    4. Extracting and storing metadata about the regularization process (if requested)
+    5. Performing geometry cleanup to remove artifacts and slivers
 
-    # Check if input has CRS defined, warn if not
-    if result_geodataframe.crs is None:
-        warnings.warn(
-            "Input GeoDataFrame has no CRS defined. Assuming planar coordinates."
-        )
+    Parameters:
+    -----------
+    result_geodataframe : gpd.GeoDataFrame
+        The GeoDataFrame containing geometries to be regularized.
+    simplify : bool
+        Whether to apply initial simplification to reduce vertex count before regularization.
+    simplify_tolerance : float
+        Tolerance value for simplification operations, in the same units as the GeoDataFrame's CRS.
+        Also affects segment size during geometry preparation.
+    parallel_threshold : float
+        Distance threshold for merging nearly parallel adjacent edges during regularization.
+    allow_45_degree : bool
+        If True, allows edges to be oriented at 45-degree angles relative to the main direction.
+    diagonal_threshold_reduction : float
+        Reduction factor (in degrees) to decrease the likelihood of diagonal edges being created.
+        Values range from 0 to 22.5 degrees; higher values reduce diagonal edges.
+    allow_circles : bool
+        If True, attempts to detect nearly circular polygons and replaces them with perfect circles.
+    circle_threshold : float
+        Intersection over Union (IoU) threshold for circle detection. Values range from 0 to 1,
+        with higher values requiring closer resemblance to a perfect circle.
+    include_metadata : bool
+        If True, includes metadata columns in the output GeoDataFrame:
+        - 'iou': Intersection over Union between original and regularized geometries
+        - 'main_direction': Principal direction angle (degrees) used for regularization
 
-    # Store original CRS for potential reprojection back at the end
-    original_crs = result_geodataframe.crs
-
-    # Reproject to target CRS if specified
-    if target_crs is not None:
-        result_geodataframe = result_geodataframe.to_crs(target_crs)
-
-    # Check if the CRS used for processing is projected, warn if not
-    # Use the potentially reprojected CRS
-    current_crs = result_geodataframe.crs
-    if current_crs:  # Check if CRS exists before trying to use it
-        crs_obj = CRS.from_user_input(current_crs)
-        if not crs_obj.is_projected:
-            warnings.warn(
-                f"GeoDataFrame is in a geographic CRS ('{current_crs.name}') during processing. "
-                "Angle and distance calculations may be inaccurate. Consider setting "
-                "`target_crs` to a suitable projected CRS."
-            )
-
+    Returns:
+    --------
+    gpd.GeoDataFrame
+        A GeoDataFrame with regularized geometries and optional metadata columns.
+        Invalid or empty geometries resulting from processing are removed.
+    """
     # Apply initial simplification if requested
     if simplify:
         result_geodataframe.geometry = result_geodataframe.simplify(
@@ -195,11 +216,4 @@ def process_geometry_wrapper(
         result_geodataframe=result_geodataframe, simplify_tolerance=simplify_tolerance
     )
 
-    # Reproject back to the original CRS if it was changed
-    if target_crs is not None and original_crs is not None:
-        # Check if CRS are actually different before reprojecting
-        if not CRS.from_user_input(result_geodataframe.crs).equals(
-            CRS.from_user_input(original_crs)
-        ):
-            result_geodataframe = result_geodataframe.to_crs(original_crs)
     return result_geodataframe
