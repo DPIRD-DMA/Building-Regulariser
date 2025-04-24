@@ -6,14 +6,15 @@ import numpy as np
 from shapely.geometry import LinearRing, Polygon
 from shapely.geometry.base import BaseGeometry
 
-from .geometry_utils import calculate_azimuth_angle, calculate_distance
-from .line_operations import (
+from .geometry_utils import (
+    calculate_azimuth_angle,
+    calculate_distance,
     calculate_line_intersection,
     calculate_parallel_line_distance,
     create_line_equation,
     project_point_to_line,
+    rotate_point,
 )
-from .rotation import rotate_point
 
 
 def find_nearest_target_angle(
@@ -56,8 +57,8 @@ def enforce_angles_post_process(
     points: List[np.ndarray],
     main_direction: float,
     allow_45_degree: bool,
-    angle_tolerance: float = 0.1,  # Tolerance in degrees
-    max_iterations: int = 2,  # Number of passes to allow adjustments to settle
+    angle_tolerance: float = 0.1,
+    max_iterations: int = 2,
 ) -> List[np.ndarray]:
     """
     Adjusts vertices iteratively to enforce target angles for each segment.
@@ -74,8 +75,10 @@ def enforce_angles_post_process(
         Whether to allow 45-degree angles.
     angle_tolerance : float
          Allowable deviation from target angle in degrees.
+         Default is 0.1 degrees.
     max_iterations : int
          Maximum number of full passes to adjust angles.
+         Default is 2 iterations.
 
     Returns:
     --------
@@ -140,9 +143,9 @@ def enforce_angles_post_process(
 
 def regularize_coordinate_array(
     coordinates: np.ndarray,
-    parallel_threshold: float = 3,
-    allow_45_degree: bool = True,
-    diagonal_threshold_reduction: float = 15.0,
+    parallel_threshold: float,
+    allow_45_degree: bool,
+    diagonal_threshold_reduction: float,
     angle_enforcement_tolerance: float = 0.1,
 ) -> Tuple[np.ndarray, float]:
     """
@@ -159,8 +162,12 @@ def regularize_coordinate_array(
         Distance threshold for considering parallel lines as needing connection.
     allow_45_degree : bool
         If True, allows 45-degree orientations relative to the main direction.
+    diagonal_threshold_reduction : float
+        Angle in degrees to subtract from the 45-degree snapping thresholds,
+        making diagonal (45°) orientations less likely.
     angle_enforcement_tolerance : float
         Maximum allowed deviation (degrees) from target angle in the final output.
+        Default is 0.1 degrees.
 
     Returns:
     --------
@@ -198,14 +205,13 @@ def regularize_coordinate_array(
     )
 
     # Connect and regularize edges
-    # This returns a list of np.ndarray points, likely NOT closed
+    # This returns a list of np.ndarray points
     initial_regularized_points = connect_regularized_edges(
         oriented_edges, edge_orientations, parallel_threshold
     )
 
     if not initial_regularized_points or len(initial_regularized_points) < 3:
         warnings.warn("Regularization resulted in too few points. Returning original.")
-        # Decide what to return: maybe the simplified input or original?
         # Returning original for safety:
         return coordinates, 0.0
 
@@ -232,7 +238,7 @@ def regularize_coordinate_array(
 
 def analyze_edges(
     coordinates: np.ndarray, coarse_bin_size: int = 5, fine_bin_size: int = 1
-):
+) -> dict:
     """
     Analyze edges to determine azimuth angles and main structural direction.
 
@@ -240,6 +246,12 @@ def analyze_edges(
     -----------
     coordinates : np.ndarray
         Polygon coordinates (shape: N x 2), assumed NOT closed.
+    coarse_bin_size : int
+        Size of the coarse bin for histogram analysis (degrees).
+        Default is 5 degrees.
+    fine_bin_size : int
+        Size of the fine bin for histogram analysis (degrees).
+        Default is 1 degree.
 
     Returns:
     --------
@@ -310,15 +322,6 @@ def analyze_edges(
         a, b = top_two
         return a if hist[a] > hist[b] else b
 
-    def dist_to_dir(d: float) -> np.ndarray:
-        return np.minimum.reduce(
-            [
-                np.abs(normalized_angles - d),
-                np.abs(normalized_angles - d - 180),
-                np.abs(normalized_angles - d + 180),
-            ]
-        )
-
     # Form edges and compute vectors
     start_points = coordinates
     end_points = np.roll(coordinates, -1, axis=0)
@@ -355,7 +358,7 @@ def analyze_edges(
     )
 
     if np.sum(coarse_bins) == 0:
-        main_direction = 0
+        refined_angle = 0
     else:
         # Step 1: Coarse dominant bin
         main_bin = find_best_symmetric_bin(coarse_bins)
@@ -381,28 +384,84 @@ def analyze_edges(
             else:
                 refined_angle = math.floor(refined_angle_center)
 
-        # Step 3: Choose between refined or perpendicular angle
-        dir1 = refined_angle
-        dir2 = (refined_angle + 90) % 180
-
-        support1 = np.sum(lengths[dist_to_dir(dir1) <= dist_to_dir(dir2)])
-        support2 = np.sum(lengths[dist_to_dir(dir1) > dist_to_dir(dir2)])
-
-        main_direction = dir1 if support1 >= support2 else dir2
-
     return {
         "azimuth_angles": azimuth_angles,
         "edge_indices": edge_indices,
-        "main_direction": main_direction,
+        "main_direction": refined_angle,
     }
+
+
+def get_orientation_and_rotation(
+    diff_angle: float,
+    main_direction: float,
+    azimuth: float,
+    allow_45_degree: bool,
+    diagonal_threshold_reduction: float,
+    tolerance: float = 1e-9,
+) -> Tuple[int, float]:
+    target_offset = 0.0  # The desired angle relative to main_direction (0, 45, 90 etc.)
+    orientation_code = 0
+
+    if allow_45_degree:
+        # Calculate how close we are to each of the key orientations
+        dist_to_0 = min(abs(diff_angle % 180), abs((diff_angle % 180) - 180))
+        dist_to_90 = min(abs((diff_angle % 180) - 90), abs((diff_angle % 180) - 90))
+        dist_to_45 = min(abs((diff_angle % 180) - 45), abs((diff_angle % 180) - 135))
+
+        # Apply down-weighting to 45-degree angles
+        # This effectively shrinks the zone where angles snap to 45 degrees
+        if dist_to_45 <= (22.5 - diagonal_threshold_reduction):
+            # Close enough to 45/135/225/315 degrees (accounting for down-weighting)
+            angle_mod = diff_angle % 90
+            if angle_mod < 45:
+                target_offset = (diff_angle // 90) * 90 + 45
+            else:
+                target_offset = (diff_angle // 90 + 1) * 90 - 45
+
+            # Determine which diagonal direction we're closer to
+            # Use modulo 180 to differentiate between 45/225 and 135/315
+            normalized_angle = (main_direction + target_offset) % 180
+            if 0 <= normalized_angle < 90:
+                # This is closer to 45 degrees
+                orientation_code = 2  # 45/225 degrees
+            else:
+                # This is closer to 135 degrees
+                orientation_code = 3  # 135/315 degrees
+        elif dist_to_0 <= dist_to_90:
+            # Closer to 0/180 degrees
+            target_offset = round(diff_angle / 180.0) * 180.0
+            orientation_code = 0
+        else:
+            # Closer to 90/270 degrees
+            target_offset = round(diff_angle / 90.0) * 90.0
+            if abs(target_offset % 180) < tolerance:
+                # If rounding diff_angle/90 gave 0 or 180, force to 90 or -90
+                target_offset = 90.0 if diff_angle > 0 else -90.0
+            orientation_code = 1
+
+    else:  # Original logic (refined): Snap only to nearest 90 degrees
+        if abs(diff_angle) < 45.0:  # Closer to parallel/anti-parallel (0 or 180)
+            # Snap to 0 or 180, whichever is closer
+            target_offset = round(diff_angle / 180.0) * 180.0
+            orientation_code = 0
+        else:  # Closer to perpendicular (+90 or -90/270)
+            # Snap to +90 or -90, whichever is closer
+            target_offset = round(diff_angle / 90.0) * 90.0
+            # Ensure it's not actually 0 or 180 (should be handled above, but safety check)
+            if abs(target_offset % 180) < tolerance:
+                # If rounding diff_angle/90 gave 0 or 180, force to 90 or -90
+                target_offset = 90.0 if diff_angle > 0 else -90.0
+            orientation_code = 1
+    rotation_angle = (main_direction + target_offset - azimuth + 180) % 360 - 180
+    return orientation_code, rotation_angle
 
 
 def orient_edges(
     simplified_coordinates: np.ndarray,
     edge_data: dict,
-    allow_45_degree: bool = True,
-    diagonal_threshold_reduction: float = 15.0,
-):
+    allow_45_degree: bool,
+    diagonal_threshold_reduction: float,
+) -> Tuple[np.ndarray, List[int]]:
     """
     Orient edges to be parallel or perpendicular (or optionally 45 degrees)
     to the main direction determined by angle distribution analysis.
@@ -416,10 +475,10 @@ def orient_edges(
         'main_direction').
     allow_45_degree : bool, optional
         If True, allows edges to be oriented at 45-degree angles relative
-        to the main direction. Defaults to True.
+        to the main direction.
     diagonal_threshold_reduction : float, optional
         Angle in degrees to subtract from the 45-degree snapping thresholds,
-        making diagonal (45°) orientations less likely. Defaults to 15.0.
+        making diagonal (45°) orientations less likely.
 
     Returns:
     --------
@@ -441,9 +500,6 @@ def orient_edges(
     edge_indices = edge_data["edge_indices"]
     main_direction = edge_data["main_direction"]
 
-    # Small tolerance for floating point comparisons
-    tolerance = 1e-9
-
     for i, (azimuth, (start_idx, end_idx)) in enumerate(
         zip(azimuth_angles, edge_indices)
     ):
@@ -451,67 +507,13 @@ def orient_edges(
         # Result is in the range [-180, 180]
         diff_angle = (azimuth - main_direction + 180) % 360 - 180
 
-        target_offset = (
-            0.0  # The desired angle relative to main_direction (0, 45, 90 etc.)
+        orientation_code, rotation_angle = get_orientation_and_rotation(
+            diff_angle=diff_angle,
+            main_direction=main_direction,
+            azimuth=azimuth,
+            allow_45_degree=allow_45_degree,
+            diagonal_threshold_reduction=diagonal_threshold_reduction,
         )
-        orientation_code = 0
-
-        if allow_45_degree:
-            # Calculate how close we are to each of the key orientations
-            dist_to_0 = min(abs(diff_angle % 180), abs((diff_angle % 180) - 180))
-            dist_to_90 = min(abs((diff_angle % 180) - 90), abs((diff_angle % 180) - 90))
-            dist_to_45 = min(
-                abs((diff_angle % 180) - 45), abs((diff_angle % 180) - 135)
-            )
-
-            # Apply down-weighting to 45-degree angles
-            # This effectively shrinks the zone where angles snap to 45 degrees
-            if dist_to_45 <= (22.5 - diagonal_threshold_reduction):
-                # Close enough to 45/135/225/315 degrees (accounting for down-weighting)
-                angle_mod = diff_angle % 90
-                if angle_mod < 45:
-                    target_offset = (diff_angle // 90) * 90 + 45
-                else:
-                    target_offset = (diff_angle // 90 + 1) * 90 - 45
-
-                # Determine which diagonal direction we're closer to
-                # Use modulo 180 to differentiate between 45/225 and 135/315
-                normalized_angle = (main_direction + target_offset) % 180
-                if 0 <= normalized_angle < 90:
-                    # This is closer to 45 degrees
-                    orientation_code = 2  # 45/225 degrees
-                else:
-                    # This is closer to 135 degrees
-                    orientation_code = 3  # 135/315 degrees
-            elif dist_to_0 <= dist_to_90:
-                # Closer to 0/180 degrees
-                target_offset = round(diff_angle / 180.0) * 180.0
-                orientation_code = 0
-            else:
-                # Closer to 90/270 degrees
-                target_offset = round(diff_angle / 90.0) * 90.0
-                if abs(target_offset % 180) < tolerance:
-                    # If rounding diff_angle/90 gave 0 or 180, force to 90 or -90
-                    target_offset = 90.0 if diff_angle > 0 else -90.0
-                orientation_code = 1
-
-        else:  # Original logic (refined): Snap only to nearest 90 degrees
-            if abs(diff_angle) < 45.0:  # Closer to parallel/anti-parallel (0 or 180)
-                # Snap to 0 or 180, whichever is closer
-                target_offset = round(diff_angle / 180.0) * 180.0
-                orientation_code = 0
-            else:  # Closer to perpendicular (+90 or -90/270)
-                # Snap to +90 or -90, whichever is closer
-                target_offset = round(diff_angle / 90.0) * 90.0
-                # Ensure it's not actually 0 or 180 (should be handled above, but safety check)
-                if abs(target_offset % 180) < tolerance:
-                    # If rounding diff_angle/90 gave 0 or 180, force to 90 or -90
-                    target_offset = 90.0 if diff_angle > 0 else -90.0
-                orientation_code = 1
-
-        # Calculate the rotation angle needed to achieve the target orientation
-        # Calculate shortest rotation angle
-        rotation_angle = (main_direction + target_offset - azimuth + 180) % 360 - 180
 
         # Perform rotation
         start_point = np.array(simplified_coordinates[start_idx], dtype=float)
@@ -526,7 +528,9 @@ def orient_edges(
     return np.array(oriented_edges, dtype=object), edge_orientations
 
 
-def rotate_edge(start_point: np.ndarray, end_point: np.ndarray, rotation_angle: float):
+def rotate_edge(
+    start_point: np.ndarray, end_point: np.ndarray, rotation_angle: float
+) -> List[np.ndarray]:
     """
     Rotate an edge around its midpoint by the given angle
 
@@ -559,10 +563,9 @@ def rotate_edge(start_point: np.ndarray, end_point: np.ndarray, rotation_angle: 
     return [np.array(rotated_start), np.array(rotated_end)]
 
 
-#     return regularized_points
 def connect_regularized_edges(
     oriented_edges: np.ndarray, edge_orientations: list, parallel_threshold: float
-):
+) -> List[np.ndarray]:
     """
     Connect oriented edges to form a regularized polygon
 
@@ -619,8 +622,11 @@ def connect_regularized_edges(
 
 
 def handle_perpendicular_edges(
-    current_edge_start, current_edge_end, next_edge_start, next_edge_end
-):
+    current_edge_start: np.ndarray,
+    current_edge_end: np.ndarray,
+    next_edge_start: np.ndarray,
+    next_edge_end: np.ndarray,
+) -> np.ndarray:
     """
     Handle intersection of perpendicular edges
 
@@ -654,14 +660,14 @@ def handle_perpendicular_edges(
 
 
 def handle_parallel_edges(
-    current_edge_start,
-    current_edge_end,
-    next_edge_start,
-    next_edge_end,
-    parallel_threshold,
-    next_index,
-    oriented_edges,
-):
+    current_edge_start: np.ndarray,
+    current_edge_end: np.ndarray,
+    next_edge_start: np.ndarray,
+    next_edge_end: np.ndarray,
+    parallel_threshold: float,
+    next_index: int,
+    oriented_edges: np.ndarray,
+) -> List[np.ndarray]:
     """
     Handle connection between parallel edges
 
@@ -746,12 +752,12 @@ def handle_parallel_edges(
 
 def regularize_single_polygon(
     polygon: Polygon,
-    parallel_threshold: float = 3,
-    allow_45_degree: bool = True,
-    diagonal_threshold_reduction: float = 15.0,
-    allow_circles: bool = True,
-    circle_threshold: float = 0.90,
-    include_metadata: bool = False,
+    parallel_threshold: float,
+    allow_45_degree: bool,
+    diagonal_threshold_reduction: float,
+    allow_circles: bool,
+    circle_threshold: float,
+    include_metadata: bool,
 ) -> Tuple[Polygon, Optional[float], Optional[float]]:
     """
     Regularize a Shapely polygon by aligning edges to principal directions
@@ -764,13 +770,18 @@ def regularize_single_polygon(
         Distance threshold for parallel line handling
     allow_45_degree : bool
         If True, allows 45-degree orientations relative to the main direction
+    diagonal_threshold_reduction : float
+        Reduction factor in degrees to reduce the likelihood of diagonal
+        edges being created
     allow_circles : bool
         If True, attempts to detect polygons that are nearly circular and
         replaces them with perfect circles
     circle_threshold : float
         Intersection over Union (IoU) threshold used for circle detection
-        Value between 0 and 1
-        Defaults to 0.9
+        Value between 0 and 1.
+    include_metadata : bool
+        If True, includes metadata about the regularization process
+        in the output.
 
     Returns:
     --------
@@ -813,6 +824,7 @@ def regularize_single_polygon(
             interior_coordinates,
             parallel_threshold=parallel_threshold,
             allow_45_degree=allow_45_degree,
+            diagonal_threshold_reduction=diagonal_threshold_reduction,
         )
         regularized_interiors.append(regularized_interior)
 
