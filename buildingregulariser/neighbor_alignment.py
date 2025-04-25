@@ -11,7 +11,7 @@ def process_row(
     idx_row: tuple,
     buffer_size: float,
     min_count: int,
-    direction_threshold: float,
+    max_rotation: float,
     gdf_data: list,
     sindex_data: SpatialIndex,
 ) -> dict:
@@ -31,7 +31,7 @@ def process_row(
         Distance (in CRS units) used to identify neighboring polygons.
     min_count : int
         Minimum weighted count required for a direction to be considered dominant.
-    direction_threshold : float
+    max_rotation : float
         Maximum angular difference (in degrees) between a polygon's current direction
         and a neighbor direction to trigger alignment.
     gdf_data : list
@@ -98,7 +98,7 @@ def process_row(
 
     for align_dir, weight in sorted_directions[:4]:
         direction_delta = row.main_direction - align_dir
-        if weight > min_count and abs(direction_delta) < direction_threshold:
+        if weight > min_count and abs(direction_delta) <= max_rotation:
             result["aligned_direction"] = align_dir
             result["geometry"] = rotate(
                 row.geometry, -direction_delta, origin="centroid"
@@ -112,7 +112,7 @@ def align_with_neighbor_polygons(
     gdf: gpd.GeoDataFrame,
     buffer_size: float = 350.0,
     min_count: int = 3,
-    direction_threshold: float = 10,
+    max_rotation: float = 10,
     include_metadata: bool = False,
     num_cores: int = -1,
 ) -> gpd.GeoDataFrame:
@@ -127,7 +127,7 @@ def align_with_neighbor_polygons(
         Distance to consider for neighboring polygons
     min_count : int
         Minimum weight required for direction consideration
-    direction_threshold : float
+    max_rotation : float
         Maximum angular difference to trigger alignment
     include_metadata : bool
         Whether to include metadata columns in output
@@ -170,7 +170,7 @@ def align_with_neighbor_polygons(
         process_row,
         buffer_size=buffer_size,
         min_count=min_count,
-        direction_threshold=direction_threshold,
+        max_rotation=max_rotation,
         gdf_data=gdf_data,
         sindex_data=sindex,
     )

@@ -19,10 +19,10 @@ def regularize_geodataframe(
     circle_threshold: float = 0.9,
     num_cores: int = 0,
     include_metadata: bool = False,
-    align_with_neighbors: bool = False,
-    neighbors_buffer_size: float = 350.0,
-    neighbors_min_count: int = 3,
-    neighbors_direction_threshold: float = 10,
+    neighbor_alignment: bool = False,
+    neighbor_search_distance: float = 350.0,
+    neighbor_min_count: int = 3,
+    neighbor_max_rotation: float = 10,
 ) -> gpd.GeoDataFrame:
     """
     Regularizes polygon geometries in a GeoDataFrame by aligning edges.
@@ -63,16 +63,16 @@ def regularize_geodataframe(
     include_metadata : bool, optional
         If True, includes metadata about the regularization process in the
         output GeoDataFrame. Defaults to False.
-    align_with_neighbors : bool, optional
+    neighbor_alignment : bool, optional
         If True, aligns the polygons with their neighbors after regularization.
         Defaults to False.
-    neighbors_buffer_size : float, optional
+    neighbor_search_distance : float, optional
         Search radius used to identify neighboring polygons for alignment (if `align_with_neighbors` is True).
         Specified in the same units as the input GeoDataFrame's CRS. Defaults to 350.0.
-    neighbors_min_count : int, optional
+    neighbor_min_count : int, optional
         Minimum number of neighbors required for alignment (if
         `align_with_neighbors` is True). Defaults to 3.
-    neighbors_direction_threshold : float, optional
+    neighbor_max_rotation : float, optional
         Direction threshold for aligning with neighbors (if
         `align_with_neighbors` is True). Defaults to 10 degrees.
 
@@ -131,12 +131,12 @@ def regularize_geodataframe(
         )
 
     # Return result_geodataframe
-    if align_with_neighbors:
+    if neighbor_alignment:
         result_geodataframe = align_with_neighbor_polygons(
             gdf=result_geodataframe,
-            buffer_size=neighbors_buffer_size,
-            min_count=neighbors_min_count,
-            direction_threshold=neighbors_direction_threshold,
+            buffer_size=neighbor_search_distance,
+            min_count=neighbor_min_count,
+            max_rotation=neighbor_max_rotation,
             include_metadata=include_metadata,
             num_cores=num_cores,
         )
