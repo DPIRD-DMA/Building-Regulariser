@@ -2,7 +2,7 @@
 
 A Python library for regularizing building footprints in geospatial data. This library helps clean up and standardize building polygon geometries by aligning edges to principal directions. Built as an open source alternative to the [ArcGIS Regularize Building Footprint (3D Analyst) tool](https://pro.arcgis.com/en/pro-app/latest/tool-reference/3d-analyst/regularize-building-footprint.htm).
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)]()
+[![Python](https://img.shields.io/badge/Python-3.9%2B-blue)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 ## Example Results
@@ -23,6 +23,7 @@ Building footprints extracted from remote sensing imagery often contain noise, i
 - Converting near-circular buildings to perfect circles
 - Simplifying complex polygons while maintaining their essential shape
 - Supporting parallel processing for efficient computation with large datasets
+- Fine-tune building alignment with neighboring buildings
 
 Inspired by [RS-building-regularization](https://github.com/niecongchong/RS-building-regularization), this library takes a geometric approach to building regularization with improvements for usability and integration with the GeoPandas ecosystem.
 
@@ -34,6 +35,10 @@ pip install buildingregulariser
 or 
 ```bash
 conda install conda-forge::buildingregulariser
+```
+or 
+```bash
+uv add buildingregulariser
 ```
 ## Quick Start
 
@@ -56,9 +61,9 @@ regularized_buildings.to_file("regularized_buildings.gpkg")
 ## Features
 
 - **GeoDataFrame Integration**: Works seamlessly with GeoPandas GeoDataFrames
-- **CRS Handling**: Intelligently handles coordinate reference systems
 - **Polygon Regularization**: Aligns edges to principal directions
 - **45-Degree Support**: Optional alignment to 45-degree angles
+- **Align with neighboring buildings**: Align each building with neighboring buildings
 - **Circle Detection**: Identifies and converts near-circular shapes to perfect circles
 - **Edge Simplification**: Reduces the number of vertices while preserving shape
 - **Geometry Cleanup**: Fixes invalid geometries and removes artifacts
@@ -86,16 +91,9 @@ regularized = regularize_geodataframe(
     allow_45_degree=True,     # Enable 45-degree angles
     allow_circles=True,       # Enable circle detection
     circle_threshold=0.9      # IOU threshold for circle detection
-)
-```
-
-### Parallel Processing for Large Datasets
-
-```python
-# Use multiple CPU cores for processing
-regularized = regularize_geodataframe(
-    buildings,
-    num_cores=32 # Using 32 cores
+    neighbor_alignment=True,  # After regularization try to align each building with neighboring buildings
+    neighbor_search_distance: float = 350.0, # The search distance around each building to find neighbors
+    neighbor_max_rotation: float = 10, # The maximum rotation allowed to align with neighbors
 )
 ```
 
@@ -103,14 +101,19 @@ regularized = regularize_geodataframe(
 
 - **geodataframe**: Input GeoDataFrame with polygon geometries
 - **parallel_threshold**: Distance threshold for handling parallel lines (default: 1.0)
-- **target_crs**: Target CRS for reprojection. If None, uses the input CRS
 - **simplify**: If True, applies simplification to the geometry (default: True)
 - **simplify_tolerance**: Tolerance for simplification (default: 0.5)
 - **allow_45_degree**: If True, allows edges to be oriented at 45-degree angles (default: True)
+- **diagonal_threshold_reduction**: Used to reduce the chance of diagonal edges being generated, can be from 0 to 22.5 (default: 15.0)
 - **allow_circles**: If True, detects and converts near-circular shapes to perfect circles (default: True)
 - **circle_threshold**: Intersection over Union (IoU) threshold for circle detection (default: 0.9)
 - **num_cores**: Number of CPU cores to use for parallel processing (default: 1)
-- **include_metadata**: Include the main direction and IOU in output gdf
+- **include_metadata**: Include the main direction, IOU, perimeter and aligned_direction (if used) in output gdf
+- **neighbor_alignment**: If True, try to align each building with neighboring buildings (default: False)
+- **neighbor_search_distance**: The distance to find neighboring buildings (default: 350.0)
+- **neighbor_min_count**: The minimum count of buildings within the neighbor search area needed to form a consensus (default:  3)
+- **neighbor_max_rotation**: The maximum allowable rotation to align with neighbors (default: 10)
+
 
 ## Returns
 
@@ -123,6 +126,7 @@ regularized = regularize_geodataframe(
 3. **Circle Detection**: Optionally identifies shapes that are nearly circular and converts them to perfect circles
 4. **Edge Connection**: Ensures proper connectivity between oriented edges
 5. **Angle Enforcement**: Post-processing to ensure target angles are precisely maintained
+6. **Neighbor Alignment**: Optionally align each building with neighboring buildings, via rotation around centroid.
 
 ## License
 
