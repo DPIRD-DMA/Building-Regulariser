@@ -1,6 +1,6 @@
 import math
 import warnings
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 import numpy as np
 from shapely.geometry import LinearRing, Polygon
@@ -54,7 +54,7 @@ def find_nearest_target_angle(
 
 def enforce_angles_post_process(
     points: List[np.ndarray],
-    main_direction: float,
+    main_direction: int,
     allow_45_degree: bool,
     angle_tolerance: float = 0.1,
     max_iterations: int = 2,
@@ -215,9 +215,9 @@ def regularize_coordinate_array(
         return coordinates, 0.0
 
     final_regularized_points_list = enforce_angles_post_process(
-        initial_regularized_points,
-        edge_data["main_direction"],
-        allow_45_degree,
+        points=initial_regularized_points,
+        main_direction=edge_data["main_direction"],
+        allow_45_degree=allow_45_degree,
         angle_tolerance=angle_enforcement_tolerance,
     )
 
@@ -237,7 +237,7 @@ def regularize_coordinate_array(
 
 def analyze_edges(
     coordinates: np.ndarray, coarse_bin_size: int = 5, fine_bin_size: int = 1
-) -> dict:
+) -> dict[str, Any]:
     """
     Analyze edges to determine azimuth angles and main structural direction.
 
@@ -782,7 +782,7 @@ def regularize_single_polygon(
     include_metadata: bool,
     simplify: bool,
     simplify_tolerance: float,
-) -> dict:
+) -> dict[str, Any]:
     """
     Regularize a Shapely polygon by aligning edges to principal directions
 
@@ -828,7 +828,7 @@ def regularize_single_polygon(
     # append the first point to the end to close the polygon
 
     regularized_exterior, main_direction = regularize_coordinate_array(
-        exterior_coordinates,
+        coordinates=exterior_coordinates,
         parallel_threshold=parallel_threshold,
         allow_45_degree=allow_45_degree,
         diagonal_threshold_reduction=diagonal_threshold_reduction,
@@ -853,7 +853,7 @@ def regularize_single_polygon(
     for interior in polygon.interiors:
         interior_coordinates = np.array(interior.coords)
         regularized_interior, _ = regularize_coordinate_array(
-            interior_coordinates,
+            coordinates=interior_coordinates,
             parallel_threshold=parallel_threshold,
             allow_45_degree=allow_45_degree,
             diagonal_threshold_reduction=diagonal_threshold_reduction,

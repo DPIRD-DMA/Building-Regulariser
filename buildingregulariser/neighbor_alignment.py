@@ -1,6 +1,7 @@
 from collections import defaultdict
 from functools import partial
 from multiprocessing import Pool
+from typing import Any
 
 import geopandas as gpd
 from geopandas.sindex import SpatialIndex
@@ -14,7 +15,7 @@ def process_row(
     max_rotation: float,
     gdf_data: list,
     sindex_data: SpatialIndex,
-) -> dict:
+) -> dict[str, Any]:
     """
     Processes a single polygon row for neighbor-based alignment.
 
