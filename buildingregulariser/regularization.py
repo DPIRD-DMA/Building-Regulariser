@@ -1,10 +1,9 @@
 import math
 import warnings
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import numpy as np
 from shapely.geometry import LinearRing, Polygon
-from shapely.geometry.base import BaseGeometry
 
 from .geometry_utils import (
     calculate_azimuth_angle,
@@ -750,6 +749,29 @@ def handle_parallel_edges(
     return new_points
 
 
+def preprocess_polygon(
+    polygon: Polygon,
+    simplify: bool,
+    simplify_tolerance: float,
+) -> Polygon:
+    # Apply initial simplification if requested
+    if simplify:
+        simplified = polygon.simplify(
+            tolerance=simplify_tolerance, preserve_topology=True
+        )
+        # Remove geometries that might become invalid after simplification
+        if polygon.is_empty:
+            return polygon
+        if isinstance(simplified, Polygon):
+            polygon = simplified
+        else:
+            return polygon
+
+    polygon = polygon.segmentize(max_segment_length=simplify_tolerance * 5)
+
+    return polygon
+
+
 def regularize_single_polygon(
     polygon: Polygon,
     parallel_threshold: float,
@@ -758,7 +780,9 @@ def regularize_single_polygon(
     allow_circles: bool,
     circle_threshold: float,
     include_metadata: bool,
-) -> Tuple[Polygon, Optional[float], Optional[float]]:
+    simplify: bool,
+    simplify_tolerance: float,
+) -> dict:
     """
     Regularize a Shapely polygon by aligning edges to principal directions
 
@@ -788,9 +812,17 @@ def regularize_single_polygon(
     shapely.geometry.Polygon
         Regularized polygon
     """
-
-    # Ensure the polygon is valid
-    polygon = polygon.buffer(0)
+    if not isinstance(polygon, Polygon):
+        # Return unmodified if not a polygon
+        warnings.warn(
+            f"Unsupported geometry type: {type(polygon)}. Returning original."
+        )
+        return {"geometry": polygon, "iou": 0, "main_direction": 0}
+    polygon = preprocess_polygon(
+        polygon,
+        simplify=simplify,
+        simplify_tolerance=simplify_tolerance,
+    ).buffer(0)
 
     exterior_coordinates = np.array(polygon.exterior.coords)
     # append the first point to the end to close the polygon
@@ -844,51 +876,12 @@ def regularize_single_polygon(
         else:
             final_iou = None
 
-        return regularized_polygon, final_iou, main_direction
+        return {
+            "geometry": regularized_polygon,
+            "iou": final_iou,
+            "main_direction": main_direction,
+        }
     except Exception as e:
         # If there's an error creating the polygon, return the original
         warnings.warn(f"Error creating regularized polygon: {e}. Returning original.")
-        return polygon, None, None
-
-
-def process_geometry(
-    geometry: BaseGeometry,
-    parallel_threshold: float,
-    allow_45_degree: bool,
-    diagonal_threshold_reduction: float,
-    allow_circles: bool,
-    circle_threshold: float,
-    include_metadata: bool,
-) -> Tuple[BaseGeometry, Optional[float], Optional[float]]:
-    """
-    Process a single geometry, handling different geometry types
-
-    Parameters:
-    -----------
-    geometry : shapely.geometry.BaseGeometry
-        Input geometry to regularize
-    parallel_threshold : float
-        Distance threshold for parallel line handling
-
-    Returns:
-    --------
-    shapely.geometry.BaseGeometry
-        Regularized geometry
-    """
-    if isinstance(geometry, Polygon):
-        return regularize_single_polygon(
-            polygon=geometry,
-            parallel_threshold=parallel_threshold,
-            allow_45_degree=allow_45_degree,
-            diagonal_threshold_reduction=diagonal_threshold_reduction,
-            allow_circles=allow_circles,
-            circle_threshold=circle_threshold,
-            include_metadata=include_metadata,
-        )
-
-    else:
-        # Return unmodified if not a polygon
-        warnings.warn(
-            f"Unsupported geometry type: {type(geometry)}. Returning original."
-        )
-        return geometry, None, None
+        return {"geometry": polygon, "iou": 0, "main_direction": 0}

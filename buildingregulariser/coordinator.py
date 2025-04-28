@@ -4,8 +4,69 @@ from multiprocessing import Pool, cpu_count
 import geopandas as gpd
 import pandas as pd
 
-from .chunk_processing import get_chunk_size, process_geometry_wrapper, split_gdf
 from .neighbor_alignment import align_with_neighbor_polygons
+from .regularization import regularize_single_polygon
+
+
+def cleanup_geometry(
+    result_geodataframe: gpd.GeoDataFrame, simplify_tolerance: float
+) -> gpd.GeoDataFrame:
+    """
+    Cleans up geometries in a GeoDataFrame.
+
+    Removes empty geometries, attempts to remove small slivers using buffer
+    operations, and simplifies geometries to remove redundant vertices.
+
+    Parameters:
+    -----------
+    result_geodataframe : geopandas.GeoDataFrame
+        GeoDataFrame with geometries to clean.
+    simplify_tolerance : float
+        Tolerance used for simplification and determining buffer size
+        for sliver removal.
+
+    Returns:
+    --------
+    geopandas.GeoDataFrame
+        GeoDataFrame with cleaned geometries.
+    """
+    # Filter out None results from processing errors
+    result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
+    result_geodataframe = result_geodataframe[result_geodataframe.geometry.notna()]
+
+    if result_geodataframe.empty:
+        return result_geodataframe  # Return early if GDF is empty
+
+    # Define buffer size based on simplify tolerance
+    buffer_size = simplify_tolerance / 50
+
+    # Attempt to remove small slivers using a sequence of buffer operations
+    # Positive buffer -> negative buffer -> positive buffer
+    result_geodataframe["geometry"] = result_geodataframe.geometry.buffer(
+        buffer_size, cap_style="square", join_style="mitre"
+    )
+    result_geodataframe["geometry"] = result_geodataframe.geometry.buffer(
+        buffer_size * -2, cap_style="square", join_style="mitre"
+    )
+    result_geodataframe["geometry"] = result_geodataframe.geometry.buffer(
+        buffer_size, cap_style="square", join_style="mitre"
+    )
+
+    # Remove any geometries that became empty after buffering
+    result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
+
+    if result_geodataframe.empty:
+        return result_geodataframe  # Return early if GDF is empty
+
+    # Simplify to remove collinear vertices introduced by buffering/regularization
+    # Use a small tolerance related to the buffer size
+    result_geodataframe["geometry"] = result_geodataframe.geometry.simplify(
+        tolerance=buffer_size, preserve_topology=True
+    )
+    # Final check for empty geometries after simplification
+    result_geodataframe = result_geodataframe[~result_geodataframe.geometry.is_empty]
+
+    return result_geodataframe
 
 
 def regularize_geodataframe(
@@ -92,43 +153,43 @@ def regularize_geodataframe(
     if num_cores <= 0:
         num_cores = cpu_count()
 
+    partial_regularize_single_polygon = partial(
+        regularize_single_polygon,
+        parallel_threshold=parallel_threshold,
+        allow_45_degree=allow_45_degree,
+        diagonal_threshold_reduction=diagonal_threshold_reduction,
+        allow_circles=allow_circles,
+        circle_threshold=circle_threshold,
+        include_metadata=include_metadata,
+        simplify=simplify,
+        simplify_tolerance=simplify_tolerance,
+    )
+
+    # Sequential processing
     if num_cores == 1:
-        result_geodataframe = process_geometry_wrapper(
-            result_geodataframe=result_geodataframe,
-            simplify=simplify,
-            simplify_tolerance=simplify_tolerance,
-            parallel_threshold=parallel_threshold,
-            allow_45_degree=allow_45_degree,
-            diagonal_threshold_reduction=diagonal_threshold_reduction,
-            allow_circles=allow_circles,
-            circle_threshold=circle_threshold,
-            include_metadata=include_metadata,
-        )
+        processed_data = [
+            partial_regularize_single_polygon(geometry)
+            for geometry in result_geodataframe["geometry"]
+        ]
     else:
-        chunk_size = get_chunk_size(
-            item_count=len(result_geodataframe), num_cores=num_cores
-        )
-        gdf_chunks = split_gdf(result_geodataframe, chunk_size=chunk_size)
-
-        with Pool(processes=num_cores) as pool:
-            # Use partial to pass additional arguments to the worker function
-            process_geometry_partial = partial(
-                process_geometry_wrapper,
-                simplify=simplify,
-                simplify_tolerance=simplify_tolerance,
-                parallel_threshold=parallel_threshold,
-                allow_45_degree=allow_45_degree,
-                diagonal_threshold_reduction=diagonal_threshold_reduction,
-                allow_circles=allow_circles,
-                circle_threshold=circle_threshold,
-                include_metadata=include_metadata,
+        with Pool(num_cores) as p:
+            processed_data = p.map(
+                partial_regularize_single_polygon,
+                result_geodataframe["geometry"],
             )
-            # Process each chunk in parallel
-            processed_chunks = pool.map(process_geometry_partial, gdf_chunks)
 
-        result_geodataframe = gpd.GeoDataFrame(
-            pd.concat(processed_chunks, ignore_index=True), crs=result_geodataframe.crs
-        )
+    results_df = pd.DataFrame(processed_data)
+    result_geodataframe["geometry"] = results_df["geometry"]
+
+    if include_metadata:
+        # Extract metadata columns from the results DataFrame
+        result_geodataframe["iou"] = results_df["iou"]
+        result_geodataframe["main_direction"] = results_df["main_direction"]
+
+    # Clean up the resulting geometries (remove slivers)
+    result_geodataframe = cleanup_geometry(
+        result_geodataframe=result_geodataframe, simplify_tolerance=simplify_tolerance
+    )
 
     # Return result_geodataframe
     if neighbor_alignment:
