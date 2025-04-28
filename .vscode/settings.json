@@ -1,6 +1,7 @@
 {
     "cSpell.words": [
         "arctan",
+        "chunksize",
         "geodataframe",
         "ndarray",
         "reprojection",
