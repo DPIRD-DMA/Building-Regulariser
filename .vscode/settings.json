@@ -2,10 +2,13 @@
     "cSpell.words": [
         "arctan",
         "chunksize",
+        "fromiter",
         "geodataframe",
         "ndarray",
+        "reproject",
         "reprojection",
         "segmentize",
+        "segs",
         "sindex"
     ]
 }
