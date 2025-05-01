@@ -12,6 +12,7 @@ from .geometry_utils import (
     calculate_parallel_line_distance,
     create_line_equation,
     project_point_to_line,
+    rotate_edge,
     rotate_point,
 )
 
@@ -403,9 +404,11 @@ def get_orientation_and_rotation(
 
     if allow_45_degree:
         # Calculate how close we are to each of the key orientations
-        dist_to_0 = min(abs(diff_angle % 180), abs((diff_angle % 180) - 180))
-        dist_to_90 = min(abs((diff_angle % 180) - 90), abs((diff_angle % 180) - 90))
-        dist_to_45 = min(abs((diff_angle % 180) - 45), abs((diff_angle % 180) - 135))
+        mod180 = diff_angle % 180
+
+        dist_to_0 = min(abs(mod180), abs((mod180) - 180))
+        dist_to_90 = min(abs((mod180) - 90), abs((mod180) - 90))
+        dist_to_45 = min(abs((mod180) - 45), abs((mod180) - 135))
 
         # Apply down-weighting to 45-degree angles
         # This effectively shrinks the zone where angles snap to 45 degrees
@@ -524,42 +527,7 @@ def orient_edges(
         oriented_edges.append(rotated_edge)
         edge_orientations.append(orientation_code)
 
-    return np.array(oriented_edges, dtype=object), edge_orientations
-
-
-def rotate_edge(
-    start_point: np.ndarray, end_point: np.ndarray, rotation_angle: float
-) -> List[np.ndarray]:
-    """
-    Rotate an edge around its midpoint by the given angle
-
-    Parameters:
-    -----------
-    start_point : numpy.ndarray
-        Start point of the edge
-    end_point : numpy.ndarray
-        End point of the edge
-    rotation_angle : float
-        Angle to rotate by in degrees
-
-    Returns:
-    --------
-    list
-        List containing the rotated start and end points
-    """
-    midpoint = (start_point + end_point) / 2
-
-    if rotation_angle > 0:
-        rotated_start = rotate_point(start_point, midpoint, -rotation_angle)
-        rotated_end = rotate_point(end_point, midpoint, -rotation_angle)
-    elif rotation_angle < 0:
-        rotated_start = rotate_point(start_point, midpoint, np.abs(rotation_angle))
-        rotated_end = rotate_point(end_point, midpoint, np.abs(rotation_angle))
-    else:
-        rotated_start = start_point
-        rotated_end = end_point
-
-    return [np.array(rotated_start), np.array(rotated_end)]
+    return np.array(oriented_edges, dtype=float), edge_orientations
 
 
 def connect_regularized_edges(
@@ -836,7 +804,7 @@ def regularize_single_polygon(
 
     if allow_circles:
         radius = np.sqrt(polygon.area / np.pi)
-        perfect_circle = polygon.centroid.buffer(radius, resolution=42)
+        perfect_circle = polygon.centroid.buffer(radius, quad_segs=42)
         # Check if the polygon is close to a circle using iou
         iou = (
             perfect_circle.intersection(polygon).area
@@ -844,9 +812,7 @@ def regularize_single_polygon(
         )
         if iou > circle_threshold:
             # If the polygon is close to a circle, return the perfect circle
-            regularized_exterior = np.array(
-                perfect_circle.exterior.coords, dtype=object
-            )
+            regularized_exterior = np.array(perfect_circle.exterior.coords, dtype=float)
 
     # Handle interior rings (holes)
     regularized_interiors: List[np.ndarray] = []
@@ -874,7 +840,7 @@ def regularize_single_polygon(
                 / regularized_polygon.union(polygon).area
             )
         else:
-            final_iou = None
+            final_iou = 0
 
         return {
             "geometry": regularized_polygon,
