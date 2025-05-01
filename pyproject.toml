@@ -18,7 +18,12 @@ version = {attr = "buildingregulariser.__version__.__version__"}
 
 [dependency-groups]
 dev = [
+    "folium>=0.19.5",
     "ipykernel>=6.29.5",
+    "mapclassify>=2.8.1",
+    "matplotlib>=3.9.4",
+    "pytest>=8.3.5",
+    "rasterio>=1.4.3",
 ]
 [[tool.uv.index]]
 name = "testpypi"
