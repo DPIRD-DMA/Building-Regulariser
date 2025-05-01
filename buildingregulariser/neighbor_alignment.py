@@ -4,6 +4,7 @@ from multiprocessing import Pool
 from typing import Any
 
 import geopandas as gpd
+import numpy as np  # Ensure this is present at the top of the file
 from geopandas.sindex import SpatialIndex
 from shapely.affinity import rotate
 
@@ -61,7 +62,9 @@ def process_row(
     search_geom = geom.buffer(buffer_size)
 
     # Use spatial index data for filtering
-    candidate_idx = list(sindex_data.query(search_geom, predicate="intersects"))
+    candidate_idx = np.fromiter(
+        sindex_data.query(search_geom, predicate="intersects"), dtype=int
+    )
 
     # Only do full geometric operations on the candidates
     neighbors_data = [
@@ -145,19 +148,10 @@ def align_with_neighbor_polygons(
     result_gdf["aligned_direction"] = result_gdf["main_direction"].copy()
     result_gdf["perimeter"] = result_gdf.geometry.length
 
-    # Ensure spatial index exists
-    if not result_gdf.sindex:
-        result_gdf = result_gdf.copy()
-
     # Prepare serializable data for workers
-    gdf_data = [
-        {
-            "geometry": row.geometry,
-            "main_direction": row.main_direction,
-            "perimeter": row.perimeter,
-        }
-        for _, row in result_gdf.iterrows()
-    ]
+    gdf_data = result_gdf[["geometry", "main_direction", "perimeter"]].to_dict(
+        "records"
+    )
 
     # Get spatial index
     sindex = result_gdf.sindex
