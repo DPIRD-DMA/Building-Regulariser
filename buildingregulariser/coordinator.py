@@ -1,8 +1,10 @@
 from functools import partial
 from multiprocessing import Pool, cpu_count
+from typing import Optional, Union
 
 import geopandas as gpd
 import pandas as pd
+import pyproj
 
 from .neighbor_alignment import align_with_neighbor_polygons
 from .regularization import regularize_single_polygon
@@ -72,6 +74,7 @@ def cleanup_geometry(
 def regularize_geodataframe(
     geodataframe: gpd.GeoDataFrame,
     parallel_threshold: float = 1.0,
+    target_crs: Optional[Union[str, pyproj.CRS]] = None,
     simplify: bool = True,
     simplify_tolerance: float = 0.5,
     allow_45_degree: bool = True,
@@ -99,6 +102,9 @@ def regularize_geodataframe(
     parallel_threshold : float, optional
         Distance threshold for merging nearly parallel adjacent edges during
         regularization. Specified in the same units as the input GeoDataFrame's CRS. Defaults to 1.0.
+    target_crs : str or pyproj.CRS, optional
+        CRS to reproject the input GeoDataFrame to before regularization.
+        If None, no reprojection is performed. Defaults to None.
     simplify : bool, optional
         If True, applies initial simplification to the geometry before
         regularization. Defaults to True.
@@ -148,6 +154,10 @@ def regularize_geodataframe(
     result_geodataframe = geodataframe.copy()
     # Explode the geometries to process them individually
     result_geodataframe = result_geodataframe.explode(ignore_index=True)
+
+    if target_crs is not None:
+        # Reproject to the target CRS if specified
+        result_geodataframe = result_geodataframe.to_crs(target_crs)
     # Split gdf into chunks for parallel processing
     # Determine number of jobs
     if num_cores <= 0:
@@ -180,11 +190,8 @@ def regularize_geodataframe(
 
     results_df = pd.DataFrame(processed_data)
     result_geodataframe["geometry"] = results_df["geometry"]
-
-    if include_metadata:
-        # Extract metadata columns from the results DataFrame
-        result_geodataframe["iou"] = results_df["iou"]
-        result_geodataframe["main_direction"] = results_df["main_direction"]
+    result_geodataframe["iou"] = results_df["iou"]
+    result_geodataframe["main_direction"] = results_df["main_direction"]
 
     # Clean up the resulting geometries (remove slivers)
     result_geodataframe = cleanup_geometry(
@@ -201,5 +208,17 @@ def regularize_geodataframe(
             include_metadata=include_metadata,
             num_cores=num_cores,
         )
+
+    if not include_metadata:
+        # Extract metadata columns from the results DataFrame
+        try_to_drop_cols = [
+            "iou",
+            "main_direction",
+            "perimeter",
+            "aligned_direction",
+        ]
+        for col in try_to_drop_cols:
+            if col in result_geodataframe.columns:
+                result_geodataframe.drop(columns=col, inplace=True)
 
     return result_geodataframe
