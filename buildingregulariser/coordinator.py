@@ -84,8 +84,7 @@ def regularize_geodataframe(
     num_cores: int = 0,
     include_metadata: bool = False,
     neighbor_alignment: bool = False,
-    neighbor_search_distance: float = 350.0,
-    neighbor_min_count: int = 3,
+    neighbor_search_distance: float = 100.0,
     neighbor_max_rotation: float = 10,
 ) -> gpd.GeoDataFrame:
     """
@@ -135,10 +134,7 @@ def regularize_geodataframe(
         Defaults to False.
     neighbor_search_distance : float, optional
         Search radius used to identify neighboring polygons for alignment (if `align_with_neighbors` is True).
-        Specified in the same units as the input GeoDataFrame's CRS. Defaults to 350.0.
-    neighbor_min_count : int, optional
-        Minimum number of neighbors required for alignment (if
-        `align_with_neighbors` is True). Defaults to 3.
+        Specified in the same units as the input GeoDataFrame's CRS. Defaults to 100.0.
     neighbor_max_rotation : float, optional
         Direction threshold for aligning with neighbors (if
         `align_with_neighbors` is True). Defaults to 10 degrees.
@@ -203,7 +199,6 @@ def regularize_geodataframe(
         result_geodataframe = align_with_neighbor_polygons(
             gdf=result_geodataframe,
             buffer_size=neighbor_search_distance,
-            min_count=neighbor_min_count,
             max_rotation=neighbor_max_rotation,
             include_metadata=include_metadata,
             num_cores=num_cores,

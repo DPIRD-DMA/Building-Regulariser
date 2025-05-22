@@ -4,89 +4,67 @@ from multiprocessing import Pool
 from typing import Any
 
 import geopandas as gpd
-import numpy as np  # Ensure this is present at the top of the file
-from geopandas.sindex import SpatialIndex
+import pandas as pd
 from shapely.affinity import rotate
 
 
 def process_row(
-    idx_row: tuple,
+    idx: int,
     buffer_size: float,
-    min_count: int,
     max_rotation: float,
-    gdf_data: list,
-    sindex_data: SpatialIndex,
+    gdf: gpd.GeoDataFrame,
 ) -> dict[str, Any]:
     """
-    Processes a single polygon row for neighbor-based alignment.
+    Aligns a single polygon's orientation with its neighbours if a dominant direction is detected.
 
-    For each polygon, identifies neighboring polygons within a buffer distance,
-    analyzes their directional distribution, and rotates the polygon to align
-    with the dominant direction of its neighbors when appropriate criteria are met.
+    For a given polygon index in the GeoDataFrame, this function identifies neighbouring polygons
+    within a specified buffer, aggregates their directional data weighted by perimeter, and, if
+    conditions are met, rotates the polygon to align with the dominant neighbour direction.
 
     Parameters:
     -----------
-    idx_row : tuple
-        A tuple containing (index, row) where index is the row index and
-        row is a GeoDataFrame row with geometry and main_direction attributes.
+    idx : int
+        Index of the polygon row in the GeoDataFrame.
     buffer_size : float
-        Distance (in CRS units) used to identify neighboring polygons.
-    min_count : int
-        Minimum weighted count required for a direction to be considered dominant.
+        Distance used to define the neighbourhood search area around the polygon.
     max_rotation : float
-        Maximum angular difference (in degrees) between a polygon's current direction
-        and a neighbor direction to trigger alignment.
-    gdf_data : list
-        List of dictionaries containing serialized geometry and attribute data
-        for all polygons in the dataset.
-    sindex_data : SpatialIndex
-        Spatial index of the GeoDataFrame for efficient spatial querying.
+        Maximum allowed rotation (in degrees) from the current to the proposed direction.
+    gdf : gpd.GeoDataFrame
+        The full GeoDataFrame containing all polygons and required attributes:
+        - 'geometry': polygon geometry
+        - 'main_direction': original orientation angle
+        - 'perimeter': polygon perimeter (used as weight)
 
     Returns:
     --------
     dict
-        A dictionary containing:
-        - 'idx': original row index
-        - 'geometry': the original or aligned geometry
-        - 'aligned_direction': the direction angle after alignment
-
-    Notes:
-    ------
-    The function uses polygon perimeter as a weight when determining
-    the dominant direction among neighbors, giving preference to
-    larger neighboring polygons.
+        A dictionary with:
+        - 'idx': the index of the processed row
+        - 'geometry': original or rotated polygon geometry
+        - 'aligned_direction': selected direction used for alignment
     """
-
-    idx, row = idx_row
+    row = gdf.iloc[idx]
     geom = row.geometry
     search_geom = geom.buffer(buffer_size)
 
     # Use spatial index data for filtering
-    candidate_idx = np.fromiter(
-        sindex_data.query(search_geom, predicate="intersects"), dtype=int
-    )
+    candidate_idx = gdf.sindex.query(search_geom, predicate="intersects")
 
     # Only do full geometric operations on the candidates
-    neighbors_data = [
-        gdf_data[i]
-        for i in candidate_idx
-        if search_geom.intersects(gdf_data[i]["geometry"])
-    ]
+    neighbors_data = gdf.iloc[candidate_idx]
 
-    # Create a weighted dictionary of directions
-    direction_weights = defaultdict(float)
+    # Combine original and perpendicular directions into one Series
+    all_directions = pd.concat(
+        [neighbors_data["main_direction"], 90 - neighbors_data["main_direction"]]
+    )
+    # Calculate weights based on perimeter
+    all_weights = pd.concat([neighbors_data["perimeter"], neighbors_data["perimeter"]])
 
-    # Add weights for each direction and its perpendicular counterpart
-    for neighbor in neighbors_data:
-        direction = neighbor["main_direction"]
-        weight = neighbor["perimeter"]
+    # Aggregate weights
+    grouped_weights = all_weights.groupby(all_directions).sum()
 
-        # Add weight for the original direction
-        direction_weights[direction] += weight
-
-        # Add weight for the perpendicular direction
-        perp_direction = 90 - direction
-        direction_weights[perp_direction] += weight
+    # Convert to defaultdict
+    direction_weights = defaultdict(float, grouped_weights.to_dict())
 
     # Sort directions by their weights (highest first)
     sorted_directions = sorted(
@@ -100,9 +78,9 @@ def process_row(
         "aligned_direction": row.main_direction,
     }
 
-    for align_dir, weight in sorted_directions[:4]:
+    for align_dir, _ in sorted_directions[:4]:
         direction_delta = row.main_direction - align_dir
-        if weight > min_count and abs(direction_delta) <= max_rotation:
+        if abs(direction_delta) <= max_rotation:
             result["aligned_direction"] = align_dir
             result["geometry"] = rotate(
                 row.geometry, -direction_delta, origin="centroid"
@@ -114,74 +92,66 @@ def process_row(
 
 def align_with_neighbor_polygons(
     gdf: gpd.GeoDataFrame,
-    buffer_size: float = 350.0,
-    min_count: int = 3,
-    max_rotation: float = 10,
-    include_metadata: bool = False,
-    num_cores: int = -1,
+    num_cores: int,
+    buffer_size: float,
+    max_rotation: float,
+    include_metadata: bool,
 ) -> gpd.GeoDataFrame:
     """
-    Align polygon orientations based on their neighbors using multiprocessing.imap.
+    Aligns the orientation of polygons in a GeoDataFrame based on their neighbors' dominant direction.
+
+    Each polygon is evaluated in parallel. A buffer is used to identify neighboring polygons,
+    which are then used to infer a dominant direction. If a suitable direction is found within
+    a defined angular threshold, the polygon is rotated to match it.
 
     Parameters:
     -----------
     gdf : gpd.GeoDataFrame
-        Input GeoDataFrame with polygons and main_direction column
-    buffer_size : float
-        Distance to consider for neighboring polygons
-    min_count : int
-        Minimum weight required for direction consideration
-    max_rotation : float
-        Maximum angular difference to trigger alignment
-    include_metadata : bool
-        Whether to include metadata columns in output
+        Input GeoDataFrame with 'geometry' and 'main_direction' columns.
     num_cores : int
-        Number of parallel processes (-1 for all available)
+        Number of processes to use for parallel processing
+    buffer_size : float, default=350.0
+        Buffer distance for determining neighborhoods.
+    max_rotation : float, default=10
+        Maximum rotation angle allowed for alignment (in degrees).
+    include_metadata : bool, default=False
+        Whether to retain intermediate columns such as 'aligned_direction' and 'perimeter'.
 
     Returns:
     --------
     gpd.GeoDataFrame
-        GeoDataFrame with aligned polygons
+        A copy of the original GeoDataFrame with aligned geometries. Intermediate metadata columns
+        are included only if `include_metadata` is True.
     """
     # Create a copy and add necessary columns
-    result_gdf = gdf.copy()
-    result_gdf["aligned_direction"] = result_gdf["main_direction"].copy()
-    result_gdf["perimeter"] = result_gdf.geometry.length
-
-    # Prepare serializable data for workers
-    gdf_data = result_gdf[["geometry", "main_direction", "perimeter"]].to_dict(
-        "records"
-    )
-
-    # Get spatial index
-    sindex = result_gdf.sindex
-
-    # Prepare arguments for each row
-    idx_rows = [(idx, row) for idx, row in result_gdf.iterrows()]
+    gdf = gdf.explode(ignore_index=True).copy()
+    gdf["aligned_direction"] = gdf["main_direction"].copy()
+    gdf["perimeter"] = gdf.geometry.length
 
     # Process in parallel using imap
     results = []
     process_row_partial = partial(
         process_row,
         buffer_size=buffer_size,
-        min_count=min_count,
         max_rotation=max_rotation,
-        gdf_data=gdf_data,
-        sindex_data=sindex,
+        gdf=gdf,
     )
+
+    # Work out chunksize for imap
+    row_count = len(gdf)
+    chunksize = min(max(row_count // num_cores, 1), 5000)
+
     with Pool(processes=num_cores) as pool:
-        # Use imap for better memory efficiency with large datasets
-        for result in pool.imap(process_row_partial, idx_rows, chunksize=100):
-            results.append(result)
+        results = pool.map(process_row_partial, range(len(gdf)), chunksize=chunksize)
 
     # Update the GeoDataFrame with results
     for result in results:
         idx = result["idx"]
-        result_gdf.at[idx, "geometry"] = result["geometry"]
-        result_gdf.at[idx, "aligned_direction"] = result["aligned_direction"]
+        gdf.at[idx, "geometry"] = result["geometry"]
+        gdf.at[idx, "aligned_direction"] = result["aligned_direction"]
 
     # Clean up if needed
     if not include_metadata:
-        result_gdf = result_gdf.drop(columns=["aligned_direction", "perimeter"])
+        gdf = gdf.drop(columns=["aligned_direction", "perimeter"])
 
-    return result_gdf
+    return gdf
