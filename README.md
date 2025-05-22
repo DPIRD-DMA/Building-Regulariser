@@ -66,7 +66,6 @@ regularized_buildings.to_file("regularized_buildings.gpkg")
 - **Align with neighboring buildings**: Align each building with neighboring buildings
 - **Circle Detection**: Identifies and converts near-circular shapes to perfect circles
 - **Edge Simplification**: Reduces the number of vertices while preserving shape
-- **Geometry Cleanup**: Fixes invalid geometries and removes artifacts
 - **Parallel Processing**: Utilizes multiple CPU cores for faster processing of large datasets
 
 ## Usage Examples
@@ -92,7 +91,7 @@ regularized = regularize_geodataframe(
     allow_circles=True,       # Enable circle detection
     circle_threshold=0.9      # IOU threshold for circle detection
     neighbor_alignment=True,  # After regularization try to align each building with neighboring buildings
-    neighbor_search_distance: float = 350.0, # The search distance around each building to find neighbors
+    neighbor_search_distance: float = 100.0, # The search distance around each building to find neighbors
     neighbor_max_rotation: float = 10, # The maximum rotation allowed to align with neighbors
 )
 ```
@@ -111,7 +110,6 @@ regularized = regularize_geodataframe(
 - **include_metadata**: Include the main direction, IOU, perimeter and aligned_direction (if used) in output gdf
 - **neighbor_alignment**: If True, try to align each building with neighboring buildings (default: False)
 - **neighbor_search_distance**: The distance to find neighboring buildings (default: 350.0)
-- **neighbor_min_count**: The minimum count of buildings within the neighbor search area needed to form a consensus (default:  3)
 - **neighbor_max_rotation**: The maximum allowable rotation to align with neighbors (default: 10)
 
 
