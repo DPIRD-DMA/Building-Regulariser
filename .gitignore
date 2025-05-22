@@ -175,9 +175,8 @@ cython_debug/
 private test data/*
 *.gpkg-shm
 *.gpkg-wal
-*.gpkg*
 *__pycache__*
-**.ipynb*
 buildingregulariser.egg-info/*
-test data/*
 .DS_Store
+test data/input/old/*
+test data/output/*
