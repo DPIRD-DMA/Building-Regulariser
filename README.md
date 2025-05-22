@@ -14,6 +14,14 @@ Before and after regularization:
   <img src="https://raw.githubusercontent.com/DPIRD-DMA/Building-Regulariser/main/examples/2.png" width="45%" alt="Example 2: Before and After Regularization"/>
 </div>
 
+## Try in Colab
+
+[![Colab_Button]][Link]
+
+[Link]: https://colab.research.google.com/drive/1xeFxpQCAybgbNjmopiHZb7_Tz1lv8k6A?usp=sharing 'Try Building Regulariser In Colab'
+
+[Colab_Button]: https://img.shields.io/badge/Try%20in%20Colab-grey?style=for-the-badge&logo=google-colab
+
 ## Overview
 
 Building footprints extracted from remote sensing imagery often contain noise, irregular edges, and geometric inconsistencies. This library provides tools to regularize these footprints by:
