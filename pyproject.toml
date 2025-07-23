@@ -4,6 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "buildingregulariser"
+authors = [{name = "Nick Wright", email = "nicholas.wright@dpird.wa.gov.au"}]
 dynamic = ["version"]
 description = "A Python library for regularizing building footprints in geospatial data. This library helps clean up and standardize building polygon geometries by aligning edges to principal directions."
 readme = "README.md"
@@ -12,9 +13,12 @@ dependencies = [
     "geopandas>=1.0.0",
     "numpy>=2.0.0",
 ]
-[tool.setuptools.dynamic]
-version = {attr = "buildingregulariser.__version__.__version__"}
+license = "MIT"
+keywords = ["building", "segmentation", "geospatial", "geodataframe", "geopandas", "regularisation", "footprint", "geometry", "regularization", "house"]
 
+[tool.setuptools.dynamic]
+
+version = {attr = "buildingregulariser.__version__.__version__"}
 
 [dependency-groups]
 dev = [
@@ -24,9 +28,17 @@ dev = [
     "matplotlib>=3.9.4",
     "pytest>=8.3.5",
     "rasterio>=1.4.3",
+    "ruff>=0.12.4",
 ]
+
+[project.urls]
+Homepage = "https://github.com/DPIRD-DMA/Building-Regulariser"
+
 [[tool.uv.index]]
 name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
+
+[tool.ruff]
+select = ["E", "F", "B"]
