@@ -105,7 +105,7 @@ def enforce_angles_post_process(
             # Avoid issues with coincident points before calculating angle
             dist = calculate_distance(p1, p2)
             if dist < 1e-7:
-                # Coincident points have undefined angle, skip adjustment for this segment
+                # Coincident points have undefined angle, skip adjustment for this line
                 continue
 
             current_azimuth = calculate_azimuth_angle(p1, p2)
@@ -133,7 +133,7 @@ def enforce_angles_post_process(
                 # Update the endpoint in the list for the *next* segment's calculation
                 adjusted_points[p2_idx] = np.array(new_p2_tuple)
 
-        # Check for convergence: If no points were adjusted significantly in this pass, stop.
+        # Check for convergence: If no points were adjusted significantly, stop.
         if not changed:
             break
 
@@ -177,7 +177,9 @@ def regularize_coordinate_array(
     if (
         len(coordinates) < 4
     ):  # Need at least 3 unique points + closing point for a polygon
-        warnings.warn("Not enough coordinates to regularize. Returning original.")
+        warnings.warn(
+            "Not enough coordinates to regularize. Returning original.", stacklevel=2
+        )
         return coordinates, 0.0
 
     # Remove duplicate closing point for processing, if present
@@ -188,7 +190,8 @@ def regularize_coordinate_array(
 
     if len(processing_coords) < 3:
         warnings.warn(
-            "Not enough unique coordinates to regularize. Returning original."
+            "Not enough unique coordinates to regularize. Returning original.",
+            stacklevel=2,
         )
         return coordinates, 0.0  # Return original closed coords
 
@@ -211,7 +214,10 @@ def regularize_coordinate_array(
     )
 
     if not initial_regularized_points or len(initial_regularized_points) < 3:
-        warnings.warn("Regularization resulted in too few points. Returning original.")
+        warnings.warn(
+            "Regularization resulted in too few points. Returning original.",
+            stacklevel=2,
+        )
         # Returning original for safety:
         return coordinates, 0.0
 
@@ -224,7 +230,8 @@ def regularize_coordinate_array(
 
     if not final_regularized_points_list or len(final_regularized_points_list) < 3:
         warnings.warn(
-            "Angle enforcement resulted in too few points. Returning original."
+            "Angle enforcement resulted in too few points. Returning original.",
+            stacklevel=2,
         )
         return coordinates, 0.0
 
@@ -260,7 +267,7 @@ def analyze_edges(
         - azimuth_angles: array of absolute edge angles (degrees)
         - edge_indices: array of [start_idx, end_idx] pairs for each edge
         - main_direction: float angle (degrees) representing dominant structure orientation
-    """
+    """  # noqa: E501, W505
     if len(coordinates) < 3:
         return {
             "azimuth_angles": np.array([]),
@@ -449,7 +456,7 @@ def get_orientation_and_rotation(
         else:  # Closer to perpendicular (+90 or -90/270)
             # Snap to +90 or -90, whichever is closer
             target_offset = round(diff_angle / 90.0) * 90.0
-            # Ensure it's not actually 0 or 180 (should be handled above, but safety check)
+            # Ensure it's not actually 0 or 180 (should be handled above, safety check)
             if abs(target_offset % 180) < tolerance:
                 # If rounding diff_angle/90 gave 0 or 180, force to 90 or -90
                 target_offset = 90.0 if diff_angle > 0 else -90.0
@@ -491,7 +498,7 @@ def orient_edges(
           - 0: Parallel or anti-parallel (0, 180 deg relative to main_direction)
           - 1: Perpendicular (90, 270 deg relative to main_direction)
           - 2: Diagonal (45, 135, 225, 315 deg relative to main_direction) - only if allow_45=True.
-    """
+    """  # noqa: E501, W505
 
     # edge_data =
     oriented_edges = []
@@ -502,9 +509,7 @@ def orient_edges(
     edge_indices = edge_data["edge_indices"]
     main_direction = edge_data["main_direction"]
 
-    for i, (azimuth, (start_idx, end_idx)) in enumerate(
-        zip(azimuth_angles, edge_indices)
-    ):
+    for azimuth, (start_idx, end_idx) in zip(azimuth_angles, edge_indices):
         # Calculate the shortest angle difference from edge azimuth to main_direction
         # Result is in the range [-180, 180]
         diff_angle = (azimuth - main_direction + 180) % 360 - 180
@@ -783,7 +788,8 @@ def regularize_single_polygon(
     if not isinstance(polygon, Polygon):
         # Return unmodified if not a polygon
         warnings.warn(
-            f"Unsupported geometry type: {type(polygon)}. Returning original."
+            f"Unsupported geometry type: {type(polygon)}. Returning original.",
+            stacklevel=2,
         )
         return {"geometry": polygon, "iou": 0, "main_direction": 0}
     polygon = preprocess_polygon(
@@ -849,5 +855,8 @@ def regularize_single_polygon(
         }
     except Exception as e:
         # If there's an error creating the polygon, return the original
-        warnings.warn(f"Error creating regularized polygon: {e}. Returning original.")
+        warnings.warn(
+            f"Error creating regularized polygon: {e}. Returning original.",
+            stacklevel=2,
+        )
         return {"geometry": polygon, "iou": 0, "main_direction": 0}

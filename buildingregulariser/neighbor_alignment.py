@@ -42,7 +42,7 @@ def process_row(
         - 'idx': the index of the processed row
         - 'geometry': original or rotated polygon geometry
         - 'aligned_direction': selected direction used for alignment
-    """
+    """  # noqa: E501, W505
     row = gdf.iloc[idx]
     geom = row.geometry
     search_geom = geom.buffer(buffer_size)
@@ -122,7 +122,7 @@ def align_with_neighbor_polygons(
     gpd.GeoDataFrame
         A copy of the original GeoDataFrame with aligned geometries. Intermediate metadata columns
         are included only if `include_metadata` is True.
-    """
+    """  # noqa: E501, W505
     # Create a copy and add necessary columns
     gdf = gdf.explode(ignore_index=True).copy()
     gdf["aligned_direction"] = gdf["main_direction"].copy()

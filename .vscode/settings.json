@@ -1,14 +1,21 @@
 {
     "cSpell.words": [
+        "allclose",
         "arctan",
         "chunksize",
         "fromiter",
         "geodataframe",
+        "linalg",
         "ndarray",
+        "neighbour",
+        "neighbourhood",
+        "neighbouring",
+        "neighbours",
         "reproject",
         "reprojection",
         "segmentize",
         "segs",
         "sindex"
-    ]
+    ],
+    "python-envs.pythonProjects": []
 }
