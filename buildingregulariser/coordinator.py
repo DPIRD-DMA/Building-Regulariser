@@ -145,9 +145,11 @@ def regularize_geodataframe(
         A new GeoDataFrame with regularized polygon geometries. Original
         attributes are preserved. Geometries that failed processing might be
         dropped.
-    """
+    """  # noqa: E501, W505
     # Make a copy to avoid modifying the original GeoDataFrame
     result_geodataframe = geodataframe.copy()
+    # Fix invalid geometries
+    result_geodataframe.geometry = result_geodataframe.make_valid()
     # Explode the geometries to process them individually
     result_geodataframe = result_geodataframe.explode(ignore_index=True)
 
