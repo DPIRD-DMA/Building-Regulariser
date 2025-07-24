@@ -1,3 +1,4 @@
+import warnings
 from functools import partial
 from multiprocessing import Pool, cpu_count
 from typing import Optional, Union
@@ -148,8 +149,16 @@ def regularize_geodataframe(
     """  # noqa: E501, W505
     # Make a copy to avoid modifying the original GeoDataFrame
     result_geodataframe = geodataframe.copy()
-    # Fix invalid geometries
-    result_geodataframe.geometry = result_geodataframe.make_valid()
+    # Check for invalid geometries and warn user of potential errors
+    if not result_geodataframe.is_valid.all():
+        warnings.warn(
+            "Found invalid geometries in the GeoDataFrame. "
+            "Regularization may fail for these polygons. "
+            "Consider cleaning the geometries before regularization.",
+            stacklevel=2,
+        )
+        result_geodataframe.geometry = result_geodataframe.make_valid()
+
     # Explode the geometries to process them individually
     result_geodataframe = result_geodataframe.explode(ignore_index=True)
 
@@ -168,7 +177,6 @@ def regularize_geodataframe(
         diagonal_threshold_reduction=diagonal_threshold_reduction,
         allow_circles=allow_circles,
         circle_threshold=circle_threshold,
-        include_metadata=include_metadata,
         simplify=simplify,
         simplify_tolerance=simplify_tolerance,
     )

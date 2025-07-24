@@ -752,7 +752,6 @@ def regularize_single_polygon(
     diagonal_threshold_reduction: float,
     allow_circles: bool,
     circle_threshold: float,
-    include_metadata: bool,
     simplify: bool,
     simplify_tolerance: float,
 ) -> dict[str, Any]:
@@ -776,9 +775,6 @@ def regularize_single_polygon(
     circle_threshold : float
         Intersection over Union (IoU) threshold used for circle detection
         Value between 0 and 1.
-    include_metadata : bool
-        If True, includes metadata about the regularization process
-        in the output.
 
     Returns:
     --------
@@ -792,14 +788,17 @@ def regularize_single_polygon(
             stacklevel=2,
         )
         return {"geometry": polygon, "iou": 0, "main_direction": 0}
-    polygon = preprocess_polygon(
+    if polygon.is_empty:
+        # Return empty polygon if input is empty
+        return {"geometry": polygon, "iou": 0, "main_direction": 0}
+
+    simple_polygon = preprocess_polygon(
         polygon,
         simplify=simplify,
         simplify_tolerance=simplify_tolerance,
     ).buffer(0)
 
-    exterior_coordinates = np.array(polygon.exterior.coords)
-    # append the first point to the end to close the polygon
+    exterior_coordinates = np.array(simple_polygon.exterior.coords)
 
     regularized_exterior, main_direction = regularize_coordinate_array(
         coordinates=exterior_coordinates,
@@ -811,18 +810,18 @@ def regularize_single_polygon(
     if allow_circles:
         radius = np.sqrt(polygon.area / np.pi)
         perfect_circle = polygon.centroid.buffer(radius, quad_segs=42)
-        # Check if the polygon is close to a circle using iou
-        iou = (
+        # Check if the polygon is close to a circle using circle_iou
+        circle_iou = (
             perfect_circle.intersection(polygon).area
             / perfect_circle.union(polygon).area
         )
-        if iou > circle_threshold:
+        if circle_iou > circle_threshold:
             # If the polygon is close to a circle, return the perfect circle
             regularized_exterior = np.array(perfect_circle.exterior.coords, dtype=float)
 
     # Handle interior rings (holes)
     regularized_interiors: List[np.ndarray] = []
-    for interior in polygon.interiors:
+    for interior in simple_polygon.interiors:
         interior_coordinates = np.array(interior.coords)
         regularized_interior, _ = regularize_coordinate_array(
             coordinates=interior_coordinates,
@@ -840,19 +839,24 @@ def regularize_single_polygon(
 
         # Create regularized polygon
         regularized_polygon = Polygon(exterior_ring, interior_rings).buffer(0)
-        if include_metadata:
-            final_iou = (
-                regularized_polygon.intersection(polygon).area
-                / regularized_polygon.union(polygon).area
+        final_iou = (
+            regularized_polygon.intersection(polygon).area
+            / regularized_polygon.union(polygon).area
+        )
+        if final_iou < 0.1:
+            warnings.warn(
+                "Regularized polygon has low IoU with original polygon. "
+                "Returning original polygon.",
+                stacklevel=2,
             )
+            return {"geometry": polygon, "iou": 0, "main_direction": 0}
         else:
-            final_iou = 0
+            return {
+                "geometry": regularized_polygon,
+                "iou": final_iou,
+                "main_direction": main_direction,
+            }
 
-        return {
-            "geometry": regularized_polygon,
-            "iou": final_iou,
-            "main_direction": main_direction,
-        }
     except Exception as e:
         # If there's an error creating the polygon, return the original
         warnings.warn(
