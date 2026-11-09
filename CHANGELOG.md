@@ -4,6 +4,10 @@ All notable changes to Building-Regulariser are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- Removed the `inplace=True` call to `GeoDataFrame.drop`, which pandas 3
+  deprecates (`Pandas4Warning`) and pandas 4 will remove.
+
 ## [0.2.5] - 2026-05-04
 
 ### Added
