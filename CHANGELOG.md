@@ -8,6 +8,20 @@ All notable changes to Building-Regulariser are documented here.
 - Removed the `inplace=True` call to `GeoDataFrame.drop`, which pandas 3
   deprecates (`Pandas4Warning`) and pandas 4 will remove.
 
+### Removed
+- Python 3.9 support. 0.2.5 already failed to import on 3.9 (it uses
+  `X | Y` type unions), and 3.9 reached end-of-life in October 2025.
+  `requires-python` is now `>=3.10`, so pip on 3.9 resolves to 0.2.4.
+
+### Added
+- Python 3.14 and 3.15 classifiers. CI now runs the test suite on every
+  supported version (3.10–3.15) instead of only 3.11.
+
+### Changed
+- The sdist no longer ships CI workflows, editor settings, the example
+  notebook or README images (2.3 MB → 188 KB). Tests and test data are
+  still included so downstream packagers can run the suite.
+
 ## [0.2.5] - 2026-05-04
 
 ### Added

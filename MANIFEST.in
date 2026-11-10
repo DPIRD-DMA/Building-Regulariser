@@ -1,0 +1,10 @@
+# setuptools-scm adds every git-tracked file to the sdist; drop repo
+# tooling and docs assets that users and packagers don't need.
+# tests/ and "test data/" stay so downstream packagers can run the suite.
+prune .github
+prune .vscode
+prune examples
+exclude .gitignore
+exclude .pre-commit-config.yaml
+exclude *.ipynb
+exclude RELEASING.md
