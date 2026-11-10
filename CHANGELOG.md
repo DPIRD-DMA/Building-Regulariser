@@ -4,6 +4,8 @@ All notable changes to Building-Regulariser are documented here.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-10
+
 ### Fixed
 - Removed the `inplace=True` call to `GeoDataFrame.drop`, which pandas 3
   deprecates (`Pandas4Warning`) and pandas 4 will remove.
@@ -149,7 +151,8 @@ All notable changes to Building-Regulariser are documented here.
 - Initial public release with the core `regularize_geodataframe` API
   for aligning building polygon edges to principal directions.
 
-[Unreleased]: https://github.com/DPIRD-DMA/Building-Regulariser/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/DPIRD-DMA/Building-Regulariser/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/DPIRD-DMA/Building-Regulariser/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/DPIRD-DMA/Building-Regulariser/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/DPIRD-DMA/Building-Regulariser/compare/v0.2.2...v0.2.4
 [0.2.2]: https://github.com/DPIRD-DMA/Building-Regulariser/compare/v0.1.12...v0.2.2
