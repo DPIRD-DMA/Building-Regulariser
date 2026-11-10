@@ -509,7 +509,7 @@ def orient_edges(
     edge_indices = edge_data["edge_indices"]
     main_direction = edge_data["main_direction"]
 
-    for azimuth, (start_idx, end_idx) in zip(azimuth_angles, edge_indices):
+    for azimuth, (start_idx, end_idx) in zip(azimuth_angles, edge_indices, strict=True):
         # Calculate the shortest angle difference from edge azimuth to main_direction
         # Result is in the range [-180, 180]
         diff_angle = (azimuth - main_direction + 180) % 360 - 180

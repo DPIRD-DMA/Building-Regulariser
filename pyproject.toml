@@ -8,7 +8,7 @@ authors = [{name = "Nick Wright", email = "nicholas.wright@dpird.wa.gov.au"}]
 dynamic = ["version"]
 description = "A Python library for regularizing building footprints in geospatial data. This library helps clean up and standardize building polygon geometries by aligning edges to principal directions."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "geopandas>=1.0.0",
     "numpy>=2.0.0",
@@ -17,11 +17,12 @@ license = "MIT"
 keywords = ["building", "segmentation", "geospatial", "geodataframe", "geopandas", "regularisation", "footprint", "geometry", "regularization", "house"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Scientific/Engineering :: GIS",
     "Operating System :: OS Independent",
 ]
