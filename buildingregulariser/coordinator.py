@@ -231,8 +231,8 @@ def regularize_geodataframe(
             "perimeter",
             "aligned_direction",
         ]
-        for col in try_to_drop_cols:
-            if col in result_geodataframe.columns:
-                result_geodataframe = result_geodataframe.drop(columns=col)
+        result_geodataframe = result_geodataframe.drop(
+            columns=try_to_drop_cols, errors="ignore"
+        )
 
     return result_geodataframe

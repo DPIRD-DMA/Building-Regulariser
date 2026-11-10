@@ -8,6 +8,13 @@ All notable changes to Building-Regulariser are documented here.
 - Removed the `inplace=True` call to `GeoDataFrame.drop`, which pandas 3
   deprecates (`Pandas4Warning`) and pandas 4 will remove.
 
+### Changed
+- Metadata columns are now dropped in a single `drop` call instead of
+  one copy of the GeoDataFrame per column.
+- The test suite treats `FutureWarning` and `DeprecationWarning` as
+  errors, and new tests cover which metadata and user columns
+  `regularize_geodataframe` returns.
+
 ## [0.2.5] - 2026-05-04
 
 ### Added
