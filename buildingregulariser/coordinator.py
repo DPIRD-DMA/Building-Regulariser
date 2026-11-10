@@ -233,6 +233,6 @@ def regularize_geodataframe(
         ]
         for col in try_to_drop_cols:
             if col in result_geodataframe.columns:
-                result_geodataframe.drop(columns=col, inplace=True)
+                result_geodataframe = result_geodataframe.drop(columns=col)
 
     return result_geodataframe
