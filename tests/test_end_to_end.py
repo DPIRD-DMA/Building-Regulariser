@@ -60,7 +60,9 @@ def check_geometry_quality(inputs, outputs, iou_threshold=0.4, perimeter_toleran
         f"Row count mismatch: {len(inputs)} != {len(outputs)}"
     )
 
-    for idx, (i_geom, o_geom) in enumerate(zip(inputs.geometry, outputs.geometry)):
+    for idx, (i_geom, o_geom) in enumerate(
+        zip(inputs.geometry, outputs.geometry, strict=True)
+    ):
         assert i_geom.intersects(o_geom), f"No intersection for feature {idx}"
 
         overlap_iou = iou(i_geom, o_geom)
