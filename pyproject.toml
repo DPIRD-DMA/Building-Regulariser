@@ -51,6 +51,14 @@ dev = [
 [tool.mypy]
 ignore_missing_imports = true
 
+[tool.pytest.ini_options]
+# Fail on deprecations so removed pandas/geopandas APIs (e.g. inplace=True)
+# are caught before they break on the next major release.
+filterwarnings = [
+    "error::FutureWarning",
+    "error::DeprecationWarning",
+]
+
 [project.urls]
 Homepage = "https://github.com/DPIRD-DMA/Building-Regulariser"
 Repository = "https://github.com/DPIRD-DMA/Building-Regulariser"

@@ -21,6 +21,11 @@ All notable changes to Building-Regulariser are documented here.
 - The sdist no longer ships CI workflows, editor settings, the example
   notebook or README images (2.3 MB → 188 KB). Tests and test data are
   still included so downstream packagers can run the suite.
+- Metadata columns are now dropped in a single `drop` call instead of
+  one copy of the GeoDataFrame per column.
+- The test suite treats `FutureWarning` and `DeprecationWarning` as
+  errors, and new tests cover which metadata and user columns
+  `regularize_geodataframe` returns.
 
 ## [0.2.5] - 2026-05-04
 
