@@ -6,7 +6,9 @@ from typing import Optional, Union
 import geopandas as gpd
 import pandas as pd
 import pyproj
+import shapely
 
+from .coverage import share_walls
 from .neighbor_alignment import align_with_neighbor_polygons
 from .regularization import regularize_single_polygon
 
@@ -87,6 +89,7 @@ def regularize_geodataframe(
     neighbor_alignment: bool = False,
     neighbor_search_distance: float = 100.0,
     neighbor_max_rotation: float = 10,
+    coverage: bool = False,
 ) -> gpd.GeoDataFrame:
     """
     Regularizes polygon geometries in a GeoDataFrame by aligning edges.
@@ -139,6 +142,13 @@ def regularize_geodataframe(
     neighbor_max_rotation : float, optional
         Direction threshold for aligning with neighbors (if
         `align_with_neighbors` is True). Defaults to 10 degrees.
+    coverage : bool, optional
+        If True, the output has no overlaps and touching buildings share their
+        walls: the polygons are simplified together (if `simplify` is True) and,
+        after regularization, placed larger first: each smaller one loses its
+        overlap with them and fills the gaps to them narrower than
+        `simplify_tolerance` (a building left with only a sliver is dropped).
+        Defaults to False.
 
     Returns:
     --------
@@ -165,6 +175,11 @@ def regularize_geodataframe(
     if target_crs is not None:
         # Reproject to the target CRS if specified
         result_geodataframe = result_geodataframe.to_crs(target_crs)
+    if coverage and simplify:
+        # simplified together, a wall two buildings share stays the same edges
+        result_geodataframe["geometry"] = shapely.coverage_simplify(
+            result_geodataframe.geometry.values, simplify_tolerance
+        )
     # Split gdf into chunks for parallel processing
     # Determine number of jobs
     if num_cores <= 0:
@@ -222,6 +237,14 @@ def regularize_geodataframe(
             include_metadata=include_metadata,
             num_cores=num_cores,
         )
+
+    if coverage:
+        result_geodataframe["geometry"] = share_walls(
+            result_geodataframe.geometry.values, simplify_tolerance / 2
+        )
+        result_geodataframe = result_geodataframe[
+            ~result_geodataframe.geometry.is_empty
+        ]
 
     if not include_metadata:
         # Extract metadata columns from the results DataFrame

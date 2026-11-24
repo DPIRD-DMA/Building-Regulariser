@@ -4,6 +4,17 @@ All notable changes to Building-Regulariser are documented here.
 
 ## [Unreleased]
 
+### Added
+- `coverage` option for `regularize_geodataframe`. With `coverage=True`
+  the output has no overlaps and touching buildings share their walls:
+  the polygons are simplified together (if `simplify` is True) and, after
+  regularization, placed larger first; each smaller one loses its overlap
+  with them and fills the gaps to them narrower than `simplify_tolerance`.
+  A building left with only a sliver is dropped. Off by default.
+
+### Changed
+- Requires `shapely>=2.1` (for `shapely.coverage_simplify`).
+
 ## [0.3.0] - 2026-11-10
 
 ### Fixed

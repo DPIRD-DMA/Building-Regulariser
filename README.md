@@ -79,6 +79,7 @@ regularized_buildings.to_file("regularized_buildings.gpkg")
 - **Circle Detection**: Identifies and converts near-circular shapes to perfect circles
 - **Edge Simplification**: Reduces the number of vertices while preserving shape
 - **Parallel Processing**: Utilizes multiple CPU cores for faster processing of large datasets
+- **Shared Walls**: Optionally output a coverage: no overlaps, and touching buildings share their walls
 
 ## Usage Examples
 
@@ -108,6 +109,19 @@ regularized = regularize_geodataframe(
 )
 ```
 
+### Touching Buildings (Shared Walls)
+
+```python
+regularized = regularize_geodataframe(
+    buildings,
+    coverage=True,           # no overlaps, touching buildings share one wall
+    parallel_threshold=0.4,  # smaller tolerances suit high resolution imagery
+    simplify_tolerance=0.3,
+)
+```
+
+A building left with only a sliver after its overlaps are removed is dropped, so the output can have fewer rows than the input.
+
 ## Parameters
 
 - **geodataframe**: Input GeoDataFrame with polygon geometries
@@ -124,6 +138,7 @@ regularized = regularize_geodataframe(
 - **neighbor_alignment**: If True, try to align each building with neighboring buildings (default: False)
 - **neighbor_search_distance**: The distance to find neighboring buildings (default: 100.0)
 - **neighbor_max_rotation**: The maximum allowable rotation to align with neighbors (default: 10)
+- **coverage**: If True, the output has no overlaps and touching buildings share their walls (default: False)
 
 
 ## Returns
@@ -138,6 +153,7 @@ regularized = regularize_geodataframe(
 4. **Edge Connection**: Ensures proper connectivity between oriented edges
 5. **Angle Enforcement**: Post-processing to ensure target angles are precisely maintained
 6. **Neighbor Alignment**: Optionally align each building with neighboring buildings, via rotation around centroid.
+7. **Shared Walls**: Optionally (`coverage=True`) simplify all buildings together before step 1, then place them larger first: each smaller building loses its overlap with the ones already placed and fills the narrow gaps to them, so neighbours share one wall.
 
 ## License
 
